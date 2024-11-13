@@ -1,6 +1,6 @@
 # Video List
 
-This is a simple Go server for handling video edit requests.
+This is a simple Go server for handling video segmentation requests.
 
 ## Dependencies
 
