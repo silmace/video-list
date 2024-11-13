@@ -9,13 +9,12 @@ const navigateHome = () => {
 </script>
 
 <template>
-  <nav class="bg-gray-800 p-4">
-    <div class="container mx-auto flex items-center justify-between">
-      <div class="flex items-center">
-        <button @click="navigateHome" class="text-white text-xl font-bold">
-          Video File Manager
-        </button>
-      </div>
-    </div>
-  </nav>
+  <v-app-bar color="primary">
+    <v-app-bar-title>
+      <v-btn variant="text" @click="navigateHome" class="text-h6">
+        <v-icon start icon="mdi-video"></v-icon>
+        Video File Manager
+      </v-btn>
+    </v-app-bar-title>
+  </v-app-bar>
 </template>

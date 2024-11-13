@@ -1,13 +1,57 @@
 <script setup lang="ts">
-import { ref, onMounted } from 'vue';
-import { useRoute } from 'vue-router';
+import { ref, onMounted, onUnmounted } from 'vue';
+import { useRoute, useRouter } from 'vue-router';
 import type { VideoSegment } from '../types';
 import axios from 'axios';
+import Artplayer from 'artplayer';
+import PathBreadcrumb from './PathBreadcrumb.vue';
 
 const route = useRoute();
+const router = useRouter();
 const videoPath = ref(route.query.path as string);
 const segments = ref<VideoSegment[]>([{ startTime: '00:00:00', endTime: '00:00:00' }]);
-const videoRef = ref<HTMLVideoElement | null>(null);
+const artRef = ref<HTMLDivElement | null>(null);
+let art: Artplayer | null = null;
+
+onMounted(() => {
+  if (!videoPath.value) {
+    router.push('/');
+    return;
+  }
+
+  if (artRef.value) {
+    art = new Artplayer({
+      container: artRef.value,
+      url: `/api/media?path=${encodeURIComponent(videoPath.value)}`,
+      volume: 0.5,
+      autoplay: false,
+      pip: true,
+      screenshot: true,
+      setting: true,
+      flip: true,
+      playbackRate: true,
+      aspectRatio: true,
+      fullscreen: true,
+      fullscreenWeb: true,
+      subtitleOffset: true,
+      miniProgressBar: true,
+      mutex: true,
+      backdrop: true,
+      playsInline: true,
+      autoSize: true,
+      autoMini: true,
+      autoOrientation: true,
+      theme: '#6750A4'
+    });
+  }
+});
+
+onUnmounted(() => {
+  if (art) {
+    art.destroy();
+    art = null;
+  }
+});
 
 const addSegment = () => {
   segments.value.push({ startTime: '00:00:00', endTime: '00:00:00' });
@@ -25,8 +69,8 @@ const formatTime = (time: number): string => {
 };
 
 const setCurrentTime = (index: number, type: 'start' | 'end') => {
-  if (videoRef.value) {
-    const currentTime = videoRef.value.currentTime;
+  if (art) {
+    const currentTime = art.currentTime;
     segments.value[index][type === 'start' ? 'startTime' : 'endTime'] = formatTime(currentTime);
   }
 };
@@ -43,60 +87,100 @@ const saveSegments = async () => {
     alert('Error saving video segments');
   }
 };
+
+const getFileName = () => {
+  return videoPath.value?.split('/').pop() || 'Video Editor';
+};
 </script>
 
 <template>
-  <div class="container mx-auto p-4">
-    <div class="bg-white rounded-lg shadow p-4">
-      <h2 class="text-xl font-semibold mb-4">Video Editor</h2>
-      <video ref="videoRef" controls class="w-full max-h-[60vh] mb-4">
-        <source :src="`/api/video?path=${encodeURIComponent(videoPath)}`" type="video/mp4">
-        Your browser does not support the video tag.
-      </video>
+  <v-container class="pa-0">
+    <v-card class="mx-auto" elevation="0">
+      <v-card-title class="text-h5 px-4 pt-4 pb-2">
+        {{ getFileName() }}
+      </v-card-title>
+      
+      <v-card-subtitle class="px-4">
+        <PathBreadcrumb :path="videoPath" />
+      </v-card-subtitle>
 
-      <div class="space-y-4">
-        <div v-for="(segment, index) in segments" :key="index" class="flex items-center space-x-4">
-          <div class="flex-1">
-            <label class="block text-sm font-medium text-gray-700">Start Time</label>
-            <div class="flex items-center space-x-2">
-              <input v-model="segment.startTime" type="text" 
-                     class="mt-1 block w-full rounded-md border-gray-300 shadow-sm focus:border-indigo-500 focus:ring-indigo-500">
-              <button @click="setCurrentTime(index, 'start')" 
-                      class="px-3 py-2 bg-blue-600 text-white rounded hover:bg-blue-700">
-                Set Current
-              </button>
-            </div>
-          </div>
+      <v-card-text>
+        <div ref="artRef" class="w-100 video-player mb-6"></div>
 
-          <div class="flex-1">
-            <label class="block text-sm font-medium text-gray-700">End Time</label>
-            <div class="flex items-center space-x-2">
-              <input v-model="segment.endTime" type="text" 
-                     class="mt-1 block w-full rounded-md border-gray-300 shadow-sm focus:border-indigo-500 focus:ring-indigo-500">
-              <button @click="setCurrentTime(index, 'end')" 
-                      class="px-3 py-2 bg-blue-600 text-white rounded hover:bg-blue-700">
-                Set Current
-              </button>
-            </div>
-          </div>
+        <v-row v-for="(segment, index) in segments" :key="index" class="mb-4">
+          <v-col cols="12" sm="5">
+            <v-text-field
+              v-model="segment.startTime"
+              label="Start Time"
+              hide-details
+              density="comfortable"
+            >
+              <template v-slot:append>
+                <v-btn
+                  color="primary"
+                  @click="setCurrentTime(index, 'start')"
+                >
+                  Set Current
+                </v-btn>
+              </template>
+            </v-text-field>
+          </v-col>
 
-          <button @click="removeSegment(index)" 
-                  class="mt-6 px-3 py-2 bg-red-600 text-white rounded hover:bg-red-700">
-            Remove
-          </button>
-        </div>
-      </div>
+          <v-col cols="12" sm="5">
+            <v-text-field
+              v-model="segment.endTime"
+              label="End Time"
+              hide-details
+              density="comfortable"
+            >
+              <template v-slot:append>
+                <v-btn
+                  color="primary"
+                  @click="setCurrentTime(index, 'end')"
+                >
+                  Set Current
+                </v-btn>
+              </template>
+            </v-text-field>
+          </v-col>
 
-      <div class="mt-4 space-x-4">
-        <button @click="addSegment" 
-                class="px-4 py-2 bg-green-600 text-white rounded hover:bg-green-700">
+          <v-col cols="12" sm="2" class="d-flex align-center">
+            <v-btn
+              color="error"
+              variant="text"
+              icon
+              @click="removeSegment(index)"
+              :disabled="segments.length === 1"
+            >
+              <v-icon>mdi-delete</v-icon>
+            </v-btn>
+          </v-col>
+        </v-row>
+      </v-card-text>
+
+      <v-card-actions class="px-4 pb-4">
+        <v-btn
+          color="success"
+          prepend-icon="mdi-plus"
+          @click="addSegment"
+        >
           Add Segment
-        </button>
-        <button @click="saveSegments" 
-                class="px-4 py-2 bg-indigo-600 text-white rounded hover:bg-indigo-700">
+        </v-btn>
+        <v-spacer></v-spacer>
+        <v-btn
+          color="primary"
+          prepend-icon="mdi-content-save"
+          @click="saveSegments"
+        >
           Save Segments
-        </button>
-      </div>
-    </div>
-  </div>
+        </v-btn>
+      </v-card-actions>
+    </v-card>
+  </v-container>
 </template>
+
+<style scoped>
+.video-player {
+  aspect-ratio: 16/9;
+}
+</style>
