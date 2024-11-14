@@ -30,7 +30,7 @@ const vuetify = createVuetify({
           error: '#B3261E',
           info: '#2196F3',
           success: '#4CAF50',
-          warning: '#FB8C00',
+          warning: '#E91E63',
         }
       },
       dark: {

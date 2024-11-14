@@ -19,14 +19,14 @@ const navigateHome = () => {
 </script>
 
 <template>
-  <v-app-bar color="surface" elevation="2">
+  <v-app-bar :color="isDark ? 'surface' : 'primary'" elevation="2">
     <!-- <template v-slot:prepend>
       <v-app-bar-nav-icon></v-app-bar-nav-icon>
     </template> -->
 
     <v-app-bar-title>
       <v-btn variant="text" @click="navigateHome" class="text-h6">
-        <v-icon start icon="mdi-video" color="primary"></v-icon>
+        <v-icon start icon="mdi-list-box" color="secondary"></v-icon>
         Video List
       </v-btn>
     </v-app-bar-title>

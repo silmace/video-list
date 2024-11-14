@@ -136,7 +136,7 @@ onMounted(() => {
             <td>{{ new Date(item.modifiedTime).toLocaleString() }}</td>
             <td>
               <v-btn
-                color="error"
+                color="warning"
                 variant="text"
                 icon
                 @click.stop="deleteFile(item, $event)"
