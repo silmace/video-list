@@ -1,16 +1,21 @@
 <script setup lang="ts">
 import { useRouter } from 'vue-router';
 import { useTheme } from 'vuetify';
-import { ref, watch } from 'vue';
+import { ref, watch, onMounted } from 'vue';
 
 const router = useRouter();
 const theme = useTheme();
 
-const isDark = ref(theme.global.name.value === 'dark');
+const savedTheme = localStorage.getItem('theme') || 'light';
+const isDark = ref(savedTheme === 'dark');
+
+onMounted(() => {
+  theme.global.name.value = isDark.value ? 'dark' : 'light';
+});
 
 watch(isDark, (newValue) => {
-  theme.global.name.value = newValue ? 'dark' : 'light'
-  localStorage.setItem('theme', newValue ? 'dark' : 'light')
+  theme.global.name.value = newValue ? 'dark' : 'light';
+  localStorage.setItem('theme', newValue ? 'dark' : 'light');
 });
 
 const navigateHome = () => {
@@ -19,7 +24,7 @@ const navigateHome = () => {
 </script>
 
 <template>
-  <v-app-bar :color="isDark ? 'surface' : 'primary'" elevation="2">
+  <v-app-bar :color="isDark ? 'surface' : 'success'" elevation="2">
     <!-- <template v-slot:prepend>
       <v-app-bar-nav-icon></v-app-bar-nav-icon>
     </template> -->
