@@ -1,5 +1,5 @@
 <script setup lang="ts">
-import { ref, onMounted } from 'vue';
+import { ref, onMounted, computed } from 'vue';
 import { useRouter } from 'vue-router';
 import type { FileItem } from '../types';
 import axios from 'axios';
@@ -11,6 +11,7 @@ const currentPath = ref('/');
 const showImageDialog = ref(false);
 const selectedImage = ref<FileItem | null>(null);
 const loading = ref(false);
+const search = ref('');
 
 const fetchFiles = async (path: string = '/') => {
   loading.value = true;
@@ -88,6 +89,13 @@ const getFileIcon = (file: FileItem): string => {
   return 'mdi-file';
 };
 
+const filteredFiles = computed(() => {
+  if (!search.value) {
+    return files.value;
+  }
+  return files.value.filter(file => file.name.toLowerCase().includes(search.value.toLowerCase()));
+});
+
 onMounted(() => {
   fetchFiles();
 });
@@ -109,8 +117,9 @@ onMounted(() => {
           { title: 'Modified', key: 'modifiedTime', sortable: true },
           { title: 'Actions', key: 'actions', sortable: false },
         ]"
-        :items="files"
+        :items="filteredFiles"
         :loading="loading"
+        :items-per-page="50"
         hover
       >
         <template v-slot:item="{ item }">

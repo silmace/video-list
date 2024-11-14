@@ -20,14 +20,14 @@ const navigateHome = () => {
 
 <template>
   <v-app-bar color="surface" elevation="2">
-    <template v-slot:prepend>
+    <!-- <template v-slot:prepend>
       <v-app-bar-nav-icon></v-app-bar-nav-icon>
-    </template>
+    </template> -->
 
     <v-app-bar-title>
       <v-btn variant="text" @click="navigateHome" class="text-h6">
         <v-icon start icon="mdi-video" color="primary"></v-icon>
-        Video File Manager
+        Video List
       </v-btn>
     </v-app-bar-title>
 
