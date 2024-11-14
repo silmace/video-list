@@ -120,27 +120,27 @@ const handlePathNavigation = (path: string) => {
       <v-card-text>
         <div ref="artRef" class="video-player mb-6"></div>
 
-        <v-expansion-panels>
-          <v-expansion-panel
-            v-for="(segment, index) in segments"
-            :key="index"
-            class="mb-2"
-          >
-            <v-expansion-panel-title>
-              Segment {{ index + 1 }}
-              <template v-slot:actions>
-                <v-btn
-                  color="error"
-                  variant="text"
-                  icon
-                  @click.stop="removeSegment(index)"
-                  :disabled="segments.length === 1"
-                >
-                  <v-icon>mdi-delete</v-icon>
-                </v-btn>
-              </template>
-            </v-expansion-panel-title>
-            <v-expansion-panel-text>
+        <div v-for="(segment, index) in segments" :key="index" class="mb-2">
+          <v-card>
+            <v-card-title>
+              <v-row align="center" justify="space-between" style="width: 100%;">
+                <v-col cols="auto">
+                  Segment {{ index + 1 }}
+                </v-col>
+                <v-col cols="auto">
+                  <v-btn
+                    color="error"
+                    variant="text"
+                    icon
+                    @click.stop="removeSegment(index)"
+                    :disabled="segments.length === 1"
+                  >
+                    <v-icon>mdi-delete</v-icon>
+                  </v-btn>
+                </v-col>
+              </v-row>
+            </v-card-title>
+            <v-card-text>
               <v-row>
                 <v-col cols="12" sm="6">
                   <v-text-field
@@ -178,9 +178,9 @@ const handlePathNavigation = (path: string) => {
                   </v-text-field>
                 </v-col>
               </v-row>
-            </v-expansion-panel-text>
-          </v-expansion-panel>
-        </v-expansion-panels>
+            </v-card-text>
+          </v-card>
+        </div>
       </v-card-text>
 
       <v-card-actions class="px-4 pb-4">
