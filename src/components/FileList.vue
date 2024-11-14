@@ -10,14 +10,18 @@ const router = useRouter();
 const currentPath = ref('/');
 const showImageDialog = ref(false);
 const selectedImage = ref<FileItem | null>(null);
+const loading = ref(false);
 
 const fetchFiles = async (path: string = '/') => {
+  loading.value = true;
   try {
     const response = await axios.get(`/api/files?path=${encodeURIComponent(path)}`);
     files.value = response.data;
     currentPath.value = path;
   } catch (error) {
     console.error('Error fetching files:', error);
+  } finally {
+    loading.value = false;
   }
 };
 
@@ -31,9 +35,8 @@ const handleFileClick = async (file: FileItem) => {
     selectedImage.value = file;
     showImageDialog.value = true;
   } else {
-    // Download other file types
     try {
-      const response = await axios.get(`/api/media?path=${encodeURIComponent(file.path)}`, {
+      const response = await axios.get(`/api/files?path=${encodeURIComponent(file.path)}`, {
         responseType: 'blob'
       });
       const url = window.URL.createObjectURL(new Blob([response.data]));
@@ -46,7 +49,6 @@ const handleFileClick = async (file: FileItem) => {
       window.URL.revokeObjectURL(url);
     } catch (error) {
       console.error('Error downloading file:', error);
-      alert('Failed to download file');
     }
   }
 };
@@ -59,7 +61,6 @@ const deleteFile = async (file: FileItem, event: Event) => {
       fetchFiles(currentPath.value);
     } catch (error) {
       console.error('Error deleting file:', error);
-      alert('Failed to delete file');
     }
   }
 };
@@ -93,69 +94,77 @@ onMounted(() => {
 </script>
 
 <template>
-  <v-container>
-    <v-card>
-      <v-card-subtitle class="px-4">
+  <v-container class="pa-4">
+    <v-card class="mb-4">
+      <v-card-text>
         <PathBreadcrumb :path="currentPath" :onNavigate="fetchFiles" />
-      </v-card-subtitle>
+      </v-card-text>
+    </v-card>
 
-      <v-table>
-        <thead>
-          <tr>
-            <th>Name</th>
-            <th>Size</th>
-            <th>Modified</th>
-            <th>Actions</th>
-          </tr>
-        </thead>
-        <tbody>
-          <tr v-if="currentPath !== '/'" 
-              @click="fetchFiles(currentPath.split('/').slice(0, -2).join('/') + '/')"
-              style="cursor: pointer">
+    <v-card>
+      <v-data-table
+        :headers="[
+          { title: 'Name', key: 'name', sortable: true },
+          { title: 'Size', key: 'size', sortable: true },
+          { title: 'Modified', key: 'modifiedTime', sortable: true },
+          { title: 'Actions', key: 'actions', sortable: false },
+        ]"
+        :items="files"
+        :loading="loading"
+        hover
+      >
+        <template v-slot:item="{ item }">
+          <tr @click="handleFileClick(item)" style="cursor: pointer">
             <td>
               <div class="d-flex align-center">
-                <v-icon class="mr-2">mdi-folder</v-icon>
-                <span>..</span>
+                <v-icon :color="item.isDirectory ? 'primary' : ''" class="mr-2">
+                  {{ getFileIcon(item) }}
+                </v-icon>
+                <span>{{ item.name }}</span>
               </div>
             </td>
-            <td>-</td>
-            <td>-</td>
-            <td></td>
-          </tr>
-          <tr v-for="file in files" 
-              :key="file.path" 
-              @click="handleFileClick(file)"
-              style="cursor: pointer">
-            <td>
-              <div class="d-flex align-center">
-                <v-icon class="mr-2">{{ getFileIcon(file) }}</v-icon>
-                <span>{{ file.name }}</span>
-              </div>
-            </td>
-            <td>{{ formatSize(file.size) }}</td>
-            <td>{{ new Date(file.modifiedTime).toLocaleString() }}</td>
+            <td>{{ formatSize(item.size) }}</td>
+            <td>{{ new Date(item.modifiedTime).toLocaleString() }}</td>
             <td>
               <v-btn
                 color="error"
                 variant="text"
                 icon
-                @click.stop="deleteFile(file, $event)"
+                @click.stop="deleteFile(item, $event)"
               >
                 <v-icon>mdi-delete</v-icon>
               </v-btn>
             </td>
           </tr>
-        </tbody>
-      </v-table>
+        </template>
+
+        <template v-slot:top>
+          <v-toolbar flat color="transparent">
+            <v-toolbar-title>Files</v-toolbar-title>
+            <v-spacer></v-spacer>
+            <v-text-field
+              v-model="search"
+              prepend-icon="mdi-magnify"
+              label="Search"
+              single-line
+              hide-details
+              density="comfortable"
+              class="mr-4"
+            ></v-text-field>
+          </v-toolbar>
+        </template>
+      </v-data-table>
     </v-card>
 
     <v-dialog v-model="showImageDialog" max-width="90vw">
       <v-card v-if="selectedImage">
-        <v-card-title class="text-h6">
-          {{ selectedImage.name }}
+        <v-toolbar flat>
+          <v-toolbar-title>{{ selectedImage.name }}</v-toolbar-title>
           <v-spacer></v-spacer>
-          <v-btn icon="mdi-close" variant="text" @click="showImageDialog = false"></v-btn>
-        </v-card-title>
+          <v-btn icon @click="showImageDialog = false">
+            <v-icon>mdi-close</v-icon>
+          </v-btn>
+        </v-toolbar>
         <v-card-text class="pa-0">
           <v-img
             :src="`/api/media?path=${encodeURIComponent(selectedImage.path)}`"

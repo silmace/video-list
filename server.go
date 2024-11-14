@@ -25,7 +25,7 @@ var BaseDir string
 
 type FileInfo struct {
 	Name         string    `json:"name"`
-	Path         string    `json:"path"`
+	Path         string    `json:"path"` // This will now be relative path
 	IsDirectory  bool      `json:"isDirectory"`
 	Size         int64     `json:"size"`
 	ModifiedTime time.Time `json:"modifiedTime"`
@@ -41,11 +41,33 @@ type VideoEditRequest struct {
 	Segments  []Segment `json:"segments"`
 }
 
+// Convert absolute path to relative path
+func toRelativePath(path string) string {
+	rel, err := filepath.Rel(BaseDir, path)
+	if err != nil {
+		return ""
+	}
+	return filepath.ToSlash(rel)
+}
+
+// Convert relative path to absolute path and validate
+func toAbsolutePath(relPath string) (string, error) {
+	// Clean the path to remove any ".." or "." components
+	relPath = filepath.Clean(filepath.FromSlash(relPath))
+	absPath := filepath.Join(BaseDir, relPath)
+
+	// Ensure the resulting path is still within BaseDir
+	if !strings.HasPrefix(absPath, BaseDir) {
+		return "", errors.New("invalid path: outside base directory")
+	}
+
+	return absPath, nil
+}
+
 func main() {
 	// Define the flag for BaseDir
 	flag.StringVar(&BaseDir, "baseDir", "/www", "Base directory to serve files from")
 	flag.Parse()
-	println("BaseDir:", BaseDir)
 
 	// Initialize logging
 	logFile, err := os.OpenFile("server.log", os.O_CREATE|os.O_APPEND|os.O_WRONLY, 0644)
@@ -84,18 +106,18 @@ func handleFiles(w http.ResponseWriter, r *http.Request) {
 
 // List files in directory
 func listFiles(w http.ResponseWriter, r *http.Request) {
-	requestedPath := r.URL.Query().Get("path")
-	if requestedPath == "" {
-		requestedPath = "/"
+	relPath := r.URL.Query().Get("path")
+	if relPath == "" {
+		relPath = "/"
 	}
-	fullPath := filepath.Join(BaseDir, requestedPath)
 
-	if !strings.HasPrefix(fullPath, BaseDir) {
-		http.Error(w, "Access denied", http.StatusForbidden)
+	absPath, err := toAbsolutePath(relPath)
+	if err != nil {
+		http.Error(w, "Invalid path", http.StatusBadRequest)
 		return
 	}
 
-	files, err := ioutil.ReadDir(fullPath)
+	files, err := ioutil.ReadDir(absPath)
 	if err != nil {
 		http.Error(w, "Failed to read directory", http.StatusInternalServerError)
 		log.Println("Error reading directory:", err)
@@ -104,9 +126,10 @@ func listFiles(w http.ResponseWriter, r *http.Request) {
 
 	var fileList []FileInfo
 	for _, file := range files {
+		fullPath := filepath.Join(absPath, file.Name())
 		fileInfo := FileInfo{
 			Name:         file.Name(),
-			Path:         filepath.Join(fullPath, file.Name()),
+			Path:         toRelativePath(fullPath),
 			IsDirectory:  file.IsDir(),
 			Size:         file.Size(),
 			ModifiedTime: file.ModTime(),
@@ -119,19 +142,17 @@ func listFiles(w http.ResponseWriter, r *http.Request) {
 
 // Delete file
 func deleteFile(w http.ResponseWriter, r *http.Request) {
-	filePath := r.URL.Query().Get("path")
-
-	if !strings.HasPrefix(filePath, BaseDir) {
-		http.Error(w, "Access denied", http.StatusForbidden)
-		log.Println("Access denied to:", filePath)
+	relPath := r.URL.Query().Get("path")
+	absPath, err := toAbsolutePath(relPath)
+	if err != nil {
+		http.Error(w, "Invalid path", http.StatusBadRequest)
 		return
 	}
 
-	var err error
-	if info, err := os.Stat(filePath); err == nil && info.IsDir() {
-		err = os.RemoveAll(filePath)
+	if info, err := os.Stat(absPath); err == nil && info.IsDir() {
+		err = os.RemoveAll(absPath)
 	} else {
-		err = os.Remove(filePath)
+		err = os.Remove(absPath)
 	}
 
 	if err != nil {
@@ -146,15 +167,19 @@ func deleteFile(w http.ResponseWriter, r *http.Request) {
 
 // Stream video or image file
 func handleMediaStream(w http.ResponseWriter, r *http.Request) {
-	mediaPath := r.URL.Query().Get("path")
-
-	if !strings.HasPrefix(mediaPath, BaseDir) || !fileExists(mediaPath) {
-		http.Error(w, "Media not found or access denied", http.StatusForbidden)
-		log.Println("Media not found or access denied:", mediaPath)
+	relPath := r.URL.Query().Get("path")
+	absPath, err := toAbsolutePath(relPath)
+	if err != nil {
+		http.Error(w, "Invalid path", http.StatusBadRequest)
 		return
 	}
 
-	file, err := os.Open(mediaPath)
+	if !fileExists(absPath) {
+		http.Error(w, "Media not found", http.StatusNotFound)
+		return
+	}
+
+	file, err := os.Open(absPath)
 	if err != nil {
 		http.Error(w, "Failed to open media file", http.StatusInternalServerError)
 		log.Println("Error opening media file:", err)
@@ -163,18 +188,18 @@ func handleMediaStream(w http.ResponseWriter, r *http.Request) {
 	defer file.Close()
 
 	contentType := "application/octet-stream"
-	if strings.HasSuffix(mediaPath, ".mp4") {
+	if strings.HasSuffix(absPath, ".mp4") {
 		contentType = "video/mp4"
-	} else if strings.HasSuffix(mediaPath, ".jpg") || strings.HasSuffix(mediaPath, ".jpeg") {
+	} else if strings.HasSuffix(absPath, ".jpg") || strings.HasSuffix(absPath, ".jpeg") {
 		contentType = "image/jpeg"
-	} else if strings.HasSuffix(mediaPath, ".png") {
+	} else if strings.HasSuffix(absPath, ".png") {
 		contentType = "image/png"
 	} else {
 		contentType = "application/file"
 	}
 
 	w.Header().Set("Content-Type", contentType)
-	http.ServeContent(w, r, mediaPath, time.Now(), file)
+	http.ServeContent(w, r, filepath.Base(absPath), time.Now(), file)
 }
 
 // Process video segments
@@ -186,10 +211,9 @@ func handleEditVideo(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	inputPath := req.VideoPath
-	if !strings.HasPrefix(inputPath, BaseDir) {
-		http.Error(w, "Access denied", http.StatusForbidden)
-		log.Println("Access denied to:", inputPath)
+	absPath, err := toAbsolutePath(req.VideoPath)
+	if err != nil {
+		http.Error(w, "Invalid path", http.StatusBadRequest)
 		return
 	}
 
@@ -205,8 +229,8 @@ func handleEditVideo(w http.ResponseWriter, r *http.Request) {
 			return
 		}
 
-		outputPath := strings.TrimSuffix(inputPath, filepath.Ext(inputPath)) + "_merge.mp4"
-		err = processSegment(inputPath, outputPath, segment.StartTime, duration)
+		outputPath := strings.TrimSuffix(absPath, filepath.Ext(absPath)) + "_merge.mp4"
+		err = processSegment(absPath, outputPath, segment.StartTime, duration)
 		if err != nil {
 			http.Error(w, "Failed to edit video", http.StatusInternalServerError)
 			log.Println("Error processing video segment:", err)
@@ -214,10 +238,10 @@ func handleEditVideo(w http.ResponseWriter, r *http.Request) {
 		}
 
 		log.Printf("Video edited successfully, output: %s", outputPath)
-		w.Write([]byte(fmt.Sprintf(`{"success": true, "output": "%s"}`, filepath.Base(outputPath))))
+		w.Write([]byte(fmt.Sprintf(`{"success": true, "output": "%s"}`, toRelativePath(outputPath))))
 	} else {
 		// Handle multiple segments
-		segmentFiles, err := processSegments(inputPath, req.Segments)
+		segmentFiles, err := processSegments(absPath, req.Segments)
 		if err != nil {
 			http.Error(w, "Failed to process segments", http.StatusInternalServerError)
 			log.Println("Error processing segments:", err)
@@ -225,7 +249,7 @@ func handleEditVideo(w http.ResponseWriter, r *http.Request) {
 		}
 		defer cleanupFiles(segmentFiles)
 
-		outputPath := strings.TrimSuffix(inputPath, filepath.Ext(inputPath)) + "_merged.mp4"
+		outputPath := strings.TrimSuffix(absPath, filepath.Ext(absPath)) + "_merged.mp4"
 		err = mergeSegments(segmentFiles, outputPath)
 		if err != nil {
 			http.Error(w, "Failed to merge video segments", http.StatusInternalServerError)
@@ -234,7 +258,7 @@ func handleEditVideo(w http.ResponseWriter, r *http.Request) {
 		}
 
 		log.Printf("Video merged successfully, output: %s", outputPath)
-		w.Write([]byte(fmt.Sprintf(`{"success": true, "output": "%s"}`, filepath.Base(outputPath))))
+		w.Write([]byte(fmt.Sprintf(`{"success": true, "output": "%s"}`, toRelativePath(outputPath))))
 	}
 }
 
@@ -246,7 +270,6 @@ func getTimeDifference(start, end string) (string, error) {
 		return "", errors.New("invalid time format")
 	}
 
-	// Use strconv.Atoi and handle the error properly
 	startHours, err := strconv.Atoi(startParts[0])
 	if err != nil {
 		return "", err
@@ -279,7 +302,6 @@ func getTimeDifference(start, end string) (string, error) {
 	return strconv.Itoa(endTotalSeconds - startTotalSeconds), nil
 }
 
-// 处理一段视频
 func processSegment(inputPath, outputPath, startTime, duration string) error {
 	log.Printf("Running ffmpeg command: ffmpeg -i %s -ss %s -t %s -c copy %s", inputPath, startTime, duration, outputPath)
 	cmd := exec.Command("ffmpeg", "-i", inputPath, "-ss", startTime, "-t", duration, "-c", "copy", outputPath)
@@ -290,11 +312,13 @@ func processSegment(inputPath, outputPath, startTime, duration string) error {
 	return err
 }
 
-// 处理多段视频
 func processSegments(inputPath string, segments []Segment) ([]string, error) {
 	var segmentFiles []string
+	tempDir := filepath.Join(filepath.Dir(inputPath), ".temp")
+	os.MkdirAll(tempDir, 0755)
+
 	for i, segment := range segments {
-		outputPath := fmt.Sprintf("./videos/.temp/segment_%d.mp4", i)
+		outputPath := filepath.Join(tempDir, fmt.Sprintf("segment_%d.mp4", i))
 		duration, err := getTimeDifference(segment.StartTime, segment.EndTime)
 		if err != nil {
 			log.Println("Invalid time format:", err)
@@ -311,7 +335,8 @@ func processSegments(inputPath string, segments []Segment) ([]string, error) {
 }
 
 func mergeSegments(segmentFiles []string, outputPath string) error {
-	concatFile := "./videos/.temp/concat.txt"
+	tempDir := filepath.Dir(segmentFiles[0])
+	concatFile := filepath.Join(tempDir, "concat.txt")
 	concatContent := ""
 	for _, file := range segmentFiles {
 		concatContent += fmt.Sprintf("file '%s'\n", file)
@@ -332,13 +357,12 @@ func mergeSegments(segmentFiles []string, outputPath string) error {
 }
 
 func cleanupFiles(files []string) {
-	for _, file := range files {
-		err := os.Remove(file)
-		if err != nil {
-			log.Printf("Failed to clean up file %s: %v", file, err)
-		} else {
-			log.Printf("Successfully cleaned up file %s", file)
-		}
+	tempDir := filepath.Dir(files[0])
+	err := os.RemoveAll(tempDir)
+	if err != nil {
+		log.Printf("Failed to clean up temp directory %s: %v", tempDir, err)
+	} else {
+		log.Printf("Successfully cleaned up temp directory %s", tempDir)
 	}
 }
 

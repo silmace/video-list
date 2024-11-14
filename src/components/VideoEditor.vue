@@ -11,6 +11,7 @@ const router = useRouter();
 const videoPath = ref(route.query.path as string);
 const segments = ref<VideoSegment[]>([{ startTime: '00:00:00', endTime: '00:00:00' }]);
 const artRef = ref<HTMLDivElement | null>(null);
+const loading = ref(false);
 let art: Artplayer | null = null;
 
 onMounted(() => {
@@ -76,15 +77,16 @@ const setCurrentTime = (index: number, type: 'start' | 'end') => {
 };
 
 const saveSegments = async () => {
+  loading.value = true;
   try {
     await axios.post('/api/edit-video', {
       videoPath: videoPath.value,
       segments: segments.value
     });
-    alert('Video segments saved successfully!');
   } catch (error) {
     console.error('Error saving video segments:', error);
-    alert('Error saving video segments');
+  } finally {
+    loading.value = false;
   }
 };
 
@@ -94,73 +96,88 @@ const getFileName = () => {
 </script>
 
 <template>
-  <v-container class="pa-0">
-    <v-card class="mx-auto" elevation="0">
-      <v-card-title class="text-h5 px-4 pt-4 pb-2">
+  <v-container class="pa-4">
+    <v-card class="mb-4">
+      <v-card-text>
+        <PathBreadcrumb :path="videoPath" />
+      </v-card-text>
+    </v-card>
+
+    <v-card>
+      <v-card-title class="text-h5 px-4 pt-4">
         {{ getFileName() }}
       </v-card-title>
-      
-      <v-card-subtitle class="px-4">
-        <PathBreadcrumb :path="videoPath" />
-      </v-card-subtitle>
 
       <v-card-text>
-        <div ref="artRef" class="w-100 video-player mb-6"></div>
+        <div ref="artRef" class="video-player mb-6"></div>
 
-        <v-row v-for="(segment, index) in segments" :key="index" class="mb-4">
-          <v-col cols="12" sm="5">
-            <v-text-field
-              v-model="segment.startTime"
-              label="Start Time"
-              hide-details
-              density="comfortable"
-            >
-              <template v-slot:append>
+        <v-expansion-panels>
+          <v-expansion-panel
+            v-for="(segment, index) in segments"
+            :key="index"
+            class="mb-2"
+          >
+            <v-expansion-panel-title>
+              Segment {{ index + 1 }}
+              <template v-slot:actions>
                 <v-btn
-                  color="primary"
-                  @click="setCurrentTime(index, 'start')"
+                  color="error"
+                  variant="text"
+                  icon
+                  @click.stop="removeSegment(index)"
+                  :disabled="segments.length === 1"
                 >
-                  Set Current
+                  <v-icon>mdi-delete</v-icon>
                 </v-btn>
               </template>
-            </v-text-field>
-          </v-col>
+            </v-expansion-panel-title>
+            <v-expansion-panel-text>
+              <v-row>
+                <v-col cols="12" sm="6">
+                  <v-text-field
+                    v-model="segment.startTime"
+                    label="Start Time"
+                    hide-details
+                    density="comfortable"
+                  >
+                    <template v-slot:append>
+                      <v-btn
+                        color="primary"
+                        @click="setCurrentTime(index, 'start')"
+                      >
+                        Set Current
+                      </v-btn>
+                    </template>
+                  </v-text-field>
+                </v-col>
 
-          <v-col cols="12" sm="5">
-            <v-text-field
-              v-model="segment.endTime"
-              label="End Time"
-              hide-details
-              density="comfortable"
-            >
-              <template v-slot:append>
-                <v-btn
-                  color="primary"
-                  @click="setCurrentTime(index, 'end')"
-                >
-                  Set Current
-                </v-btn>
-              </template>
-            </v-text-field>
-          </v-col>
-
-          <v-col cols="12" sm="2" class="d-flex align-center">
-            <v-btn
-              color="error"
-              variant="text"
-              icon
-              @click="removeSegment(index)"
-              :disabled="segments.length === 1"
-            >
-              <v-icon>mdi-delete</v-icon>
-            </v-btn>
-          </v-col>
-        </v-row>
+                <v-col cols="12" sm="6">
+                  <v-text-field
+                    v-model="segment.endTime"
+                    label="End Time"
+                    hide-details
+                    density="comfortable"
+                  >
+                    <template v-slot:append>
+                      <v-btn
+                        color="primary"
+                        @click="setCurrentTime(index, 'end')"
+                      >
+                        Set Current
+                      </v-btn>
+                    </template>
+                  </v-text-field>
+                </v-col>
+              </v-row>
+            </v-expansion-panel-text>
+          </v-expansion-panel>
+        </v-expansion-panels>
       </v-card-text>
 
       <v-card-actions class="px-4 pb-4">
         <v-btn
-          color="success"
+          color="primary"
+          variant="outlined"
           prepend-icon="mdi-plus"
           @click="addSegment"
         >
@@ -170,6 +187,7 @@ const getFileName = () => {
         <v-btn
           color="primary"
           prepend-icon="mdi-content-save"
+          :loading="loading"
           @click="saveSegments"
         >
           Save Segments
@@ -182,5 +200,8 @@ const getFileName = () => {
 <style scoped>
 .video-player {
   aspect-ratio: 16/9;
+  background-color: black;
+  border-radius: 8px;
+  overflow: hidden;
 }
 </style>

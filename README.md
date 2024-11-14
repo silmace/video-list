@@ -25,7 +25,7 @@ This is a simple Go server for handling video segmentation requests.
     ./video-list -baseDir /path/to/your/base/directory
     
 
-baseDir: The base directory to serve files from. Default is /www.
+baseDir: The base directory to serve files from. Default is '/www'
 
 ## License
 This project is licensed under the MIT License.
