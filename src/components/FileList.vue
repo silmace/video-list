@@ -1,13 +1,14 @@
 <script setup lang="ts">
-import { ref, onMounted, computed } from 'vue';
-import { useRouter } from 'vue-router';
+import { ref, onMounted } from 'vue';
+import { useRoute, useRouter } from 'vue-router';
 import type { FileItem } from '../types';
 import axios from 'axios';
 import PathBreadcrumb from './PathBreadcrumb.vue';
 
 const files = ref<FileItem[]>([]);
 const router = useRouter();
-const currentPath = ref('/');
+const route = useRoute();
+const currentPath = ref(route.query.path as string || '/');
 const showImageDialog = ref(false);
 const selectedImage = ref<FileItem | null>(null);
 const loading = ref(false);
@@ -19,6 +20,7 @@ const fetchFiles = async (path: string = '/') => {
     const response = await axios.get(`/api/files?path=${encodeURIComponent(path)}`);
     files.value = response.data;
     currentPath.value = path;
+    router.replace({ query: { path } });
   } catch (error) {
     console.error('Error fetching files:', error);
   } finally {
@@ -89,15 +91,8 @@ const getFileIcon = (file: FileItem): string => {
   return 'mdi-file';
 };
 
-const filteredFiles = computed(() => {
-  if (!search.value) {
-    return files.value;
-  }
-  return files.value.filter(file => file.name.toLowerCase().includes(search.value.toLowerCase()));
-});
-
 onMounted(() => {
-  fetchFiles();
+  fetchFiles(currentPath.value);
 });
 </script>
 
@@ -117,9 +112,9 @@ onMounted(() => {
           { title: 'Modified', key: 'modifiedTime', sortable: true },
           { title: 'Actions', key: 'actions', sortable: false },
         ]"
-        :items="filteredFiles"
+        :items="files"
         :loading="loading"
-        :items-per-page="50"
+        :search="search"
         hover
       >
         <template v-slot:item="{ item }">
@@ -136,7 +131,7 @@ onMounted(() => {
             <td>{{ new Date(item.modifiedTime).toLocaleString() }}</td>
             <td>
               <v-btn
-                color="warning"
+                color="error"
                 variant="text"
                 icon
                 @click.stop="deleteFile(item, $event)"

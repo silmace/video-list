@@ -93,13 +93,22 @@ const saveSegments = async () => {
 const getFileName = () => {
   return videoPath.value?.split('/').pop() || 'Video Editor';
 };
+
+const handlePathNavigation = (path: string) => {
+  if (path === '/') {
+    router.push('/');
+  } else {
+    const parentDir = videoPath.value.split('/').slice(0, -1).join('/');
+    router.push(`/?path=${encodeURIComponent(parentDir)}`);
+  }
+};
 </script>
 
 <template>
   <v-container class="pa-4">
     <v-card class="mb-4">
       <v-card-text>
-        <PathBreadcrumb :path="videoPath" />
+        <PathBreadcrumb :path="videoPath" :onNavigate="handlePathNavigation" />
       </v-card-text>
     </v-card>
 
