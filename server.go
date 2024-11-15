@@ -6,7 +6,6 @@ import (
 	"errors"
 	"flag"
 	"fmt"
-	"go/format"
 	"io/ioutil"
 	"log"
 	"net/http"
@@ -43,7 +42,7 @@ type VideoEditRequest struct {
 
 // Convert absolute path to relative path
 func toRelativePath(path string) string {
-	rel, err := filepath.Rel(baseDir, path)
+	rel, err := filepath.Rel(BaseDir, path)
 	if err != nil {
 		log.Println("Error converting to relative path:", err)
 		return ""
@@ -96,6 +95,7 @@ func main() {
 	mux.HandleFunc("/api/media", handleMediaStream)
 	mux.HandleFunc("/api/edit-video", handleEditVideo)
 
+	// SPA route
 	// Serve static files from the dist directory
 	distFS := http.FileServer(http.Dir("dist"))
 
