@@ -42,7 +42,6 @@ type VideoEditRequest struct {
 	Segments  []Segment `json:"segments"`
 }
 
-// Convert absolute path to relative path
 func toRelativePath(path string) string {
 	path = filepath.Clean(filepath.FromSlash(path))
 	baseDir := filepath.Clean(filepath.FromSlash(BaseDir))
@@ -55,7 +54,6 @@ func toRelativePath(path string) string {
 	return filepath.ToSlash(rel)
 }
 
-// Convert relative path to absolute path and validate
 func toAbsolutePath(relPath string) (string, error) {
 	relPath = filepath.Clean(filepath.FromSlash(relPath))
 	absPath := filepath.Join(BaseDir, relPath)
@@ -83,40 +81,31 @@ func main() {
 
 	log.SetOutput(logFile)
 
-	// Create a new mux for better route handling
 	mux := http.NewServeMux()
 
-	// API routes
 	mux.HandleFunc("/api/files", handleFiles)
 	mux.HandleFunc("/api/media", handleMediaStream)
 	mux.HandleFunc("/api/edit-video", handleEditVideo)
 
-	// Strip the "dist" prefix from embedded files
 	distFS, err := fs.Sub(embeddedFiles, "dist")
 	if err != nil {
 		log.Fatal("Failed to create sub filesystem:", err)
 	}
 
-	// Handle all other routes
 	mux.HandleFunc("/", func(w http.ResponseWriter, r *http.Request) {
-		// If it's an API request, return 404
 		if strings.HasPrefix(r.URL.Path, "/api/") {
 			http.NotFound(w, r)
 			return
 		}
 
-		// Try to serve static file from embedded filesystem
 		path := r.URL.Path
 		if path == "/" {
 			path = "/index.html"
 		}
 
-		// Remove leading slash for fs.Sub
 		path = strings.TrimPrefix(path, "/")
 
-		// Try to serve static file
 		if content, err := fs.ReadFile(distFS, path); err == nil {
-			// Set content type
 			ext := filepath.Ext(path)
 			contentType := mime.TypeByExtension(ext)
 			if contentType == "" {
@@ -127,7 +116,6 @@ func main() {
 			return
 		}
 
-		// If file not found, serve index.html for SPA routing
 		content, err := fs.ReadFile(distFS, "index.html")
 		if err != nil {
 			http.Error(w, "Internal Server Error", http.StatusInternalServerError)
@@ -143,7 +131,6 @@ func main() {
 	}
 }
 
-// Handle listing and deleting files
 func handleFiles(w http.ResponseWriter, r *http.Request) {
 	if r.Method == http.MethodGet {
 		listFiles(w, r)
@@ -154,7 +141,6 @@ func handleFiles(w http.ResponseWriter, r *http.Request) {
 	}
 }
 
-// List files in directory
 func listFiles(w http.ResponseWriter, r *http.Request) {
 	relPath := r.URL.Query().Get("path")
 	if relPath == "" {
@@ -173,13 +159,7 @@ func listFiles(w http.ResponseWriter, r *http.Request) {
 	if err != nil {
 		log.Println("Error reading directory:", err)
 		w.WriteHeader(http.StatusInternalServerError)
-		json.NewEncoder(w).Encode(map[string]string{"error": "Failed to read directory"})
-		return
-	}
-
-	if len(files) == 0 {
-		w.WriteHeader(http.StatusNoContent)
-		json.NewEncoder(w).Encode(map[string]string{"error": "Directory is empty"})
+		json.NewEncoder(w).Encode(map[string]string{"error": "Failed to read directory" + absPath})
 		return
 	}
 
@@ -197,10 +177,16 @@ func listFiles(w http.ResponseWriter, r *http.Request) {
 	}
 
 	w.Header().Set("Content-Type", "application/json")
+	if len(fileList) == 0 {
+		// Return an empty array with 200 status code instead of 204
+		// This is more appropriate for REST APIs and easier to handle on the client side
+		json.NewEncoder(w).Encode([]FileInfo{})
+		return
+	}
+
 	json.NewEncoder(w).Encode(fileList)
 }
 
-// Delete file
 func deleteFile(w http.ResponseWriter, r *http.Request) {
 	relPath := r.URL.Query().Get("path")
 	absPath, err := toAbsolutePath(relPath)
@@ -225,7 +211,6 @@ func deleteFile(w http.ResponseWriter, r *http.Request) {
 	w.Write([]byte(`{"success": true}`))
 }
 
-// Stream video or image file
 func handleMediaStream(w http.ResponseWriter, r *http.Request) {
 	relPath := r.URL.Query().Get("path")
 	absPath, err := toAbsolutePath(relPath)
@@ -262,7 +247,6 @@ func handleMediaStream(w http.ResponseWriter, r *http.Request) {
 	http.ServeContent(w, r, filepath.Base(absPath), time.Now(), file)
 }
 
-// Process video segments
 func handleEditVideo(w http.ResponseWriter, r *http.Request) {
 	var req VideoEditRequest
 	if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
@@ -280,7 +264,6 @@ func handleEditVideo(w http.ResponseWriter, r *http.Request) {
 	log.Printf("Processing video: %s", req.VideoPath)
 
 	if len(req.Segments) == 1 {
-		// Handle single segment
 		segment := req.Segments[0]
 		duration, err := getTimeDifference(segment.StartTime, segment.EndTime)
 		if err != nil {
@@ -301,7 +284,6 @@ func handleEditVideo(w http.ResponseWriter, r *http.Request) {
 		w.Header().Set("Content-Type", "application/json")
 		w.Write([]byte(fmt.Sprintf(`{"success": true, "output": "%s"}`, toRelativePath(outputPath))))
 	} else {
-		// Handle multiple segments
 		segmentFiles, err := processSegments(absPath, req.Segments)
 		if err != nil {
 			http.Error(w, "Failed to process segments", http.StatusInternalServerError)

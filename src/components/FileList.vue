@@ -53,7 +53,7 @@ const handleFileClick = async (file: FileItem) => {
     showImageDialog.value = true;
   } else {
     try {
-      const response = await axios.get(`/api/files?path=${encodeURIComponent(file.path)}`, {
+      const response = await axios.get(`/api/media?path=${encodeURIComponent(file.path)}`, {
         responseType: 'blob'
       });
       const url = window.URL.createObjectURL(new Blob([response.data]));
