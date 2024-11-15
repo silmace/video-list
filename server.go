@@ -6,8 +6,10 @@ import (
 	"errors"
 	"flag"
 	"fmt"
+	"io/fs"
 	"io/ioutil"
 	"log"
+	"mime"
 	"net/http"
 	"os"
 	"os/exec"
@@ -24,7 +26,7 @@ var BaseDir string
 
 type FileInfo struct {
 	Name         string    `json:"name"`
-	Path         string    `json:"path"` // This will now be relative path
+	Path         string    `json:"path"`
 	IsDirectory  bool      `json:"isDirectory"`
 	Size         int64     `json:"size"`
 	ModifiedTime time.Time `json:"modifiedTime"`
@@ -42,7 +44,10 @@ type VideoEditRequest struct {
 
 // Convert absolute path to relative path
 func toRelativePath(path string) string {
-	rel, err := filepath.Rel(BaseDir, path)
+	path = filepath.Clean(filepath.FromSlash(path))
+	baseDir := filepath.Clean(filepath.FromSlash(BaseDir))
+
+	rel, err := filepath.Rel(baseDir, path)
 	if err != nil {
 		log.Println("Error converting to relative path:", err)
 		return ""
@@ -52,11 +57,9 @@ func toRelativePath(path string) string {
 
 // Convert relative path to absolute path and validate
 func toAbsolutePath(relPath string) (string, error) {
-	// Clean the path to remove any ".." or "." components
 	relPath = filepath.Clean(filepath.FromSlash(relPath))
 	absPath := filepath.Join(BaseDir, relPath)
 
-	// Ensure the resulting path is still within BaseDir
 	if !strings.HasPrefix(absPath, BaseDir) {
 		return "", errors.New("invalid path: outside base directory")
 	}
@@ -65,20 +68,13 @@ func toAbsolutePath(relPath string) (string, error) {
 }
 
 func main() {
-	// Define the flag for BaseDir
 	flag.StringVar(&BaseDir, "baseDir", "/www", "Base directory to serve files from")
 	flag.Parse()
 
-	// FromSlash baseDir
-	BaseDir = filepath.Clean(filepath.FromSlash(BaseDir))
-	// Ensure BaseDir end without a trailing slash
-	BaseDir = strings.TrimSuffix(BaseDir, "/")
-	// Ensure BaseDir is an absolute path
 	if !filepath.IsAbs(BaseDir) {
 		log.Fatal("BaseDir must be an absolute path")
 	}
 
-	// Initialize logging
 	logFile, err := os.OpenFile("server.log", os.O_CREATE|os.O_APPEND|os.O_WRONLY, 0644)
 	if err != nil {
 		log.Fatal("Could not open log file:", err)
@@ -95,31 +91,52 @@ func main() {
 	mux.HandleFunc("/api/media", handleMediaStream)
 	mux.HandleFunc("/api/edit-video", handleEditVideo)
 
-	// SPA route
-	// Serve static files from the dist directory
-	distFS := http.FileServer(http.Dir("dist"))
+	// Strip the "dist" prefix from embedded files
+	distFS, err := fs.Sub(embeddedFiles, "dist")
+	if err != nil {
+		log.Fatal("Failed to create sub filesystem:", err)
+	}
 
 	// Handle all other routes
 	mux.HandleFunc("/", func(w http.ResponseWriter, r *http.Request) {
-		// If it's an API request, skip
+		// If it's an API request, return 404
 		if strings.HasPrefix(r.URL.Path, "/api/") {
 			http.NotFound(w, r)
 			return
 		}
 
-		// Try to serve the static file first
-		filePath := filepath.Join("dist", r.URL.Path)
-		if _, err := os.Stat(filePath); err == nil {
-			distFS.ServeHTTP(w, r)
+		// Try to serve static file from embedded filesystem
+		path := r.URL.Path
+		if path == "/" {
+			path = "/index.html"
+		}
+
+		// Remove leading slash for fs.Sub
+		path = strings.TrimPrefix(path, "/")
+
+		// Try to serve static file
+		if content, err := fs.ReadFile(distFS, path); err == nil {
+			// Set content type
+			ext := filepath.Ext(path)
+			contentType := mime.TypeByExtension(ext)
+			if contentType == "" {
+				contentType = "application/octet-stream"
+			}
+			w.Header().Set("Content-Type", contentType)
+			w.Write(content)
 			return
 		}
 
-		// For all other paths, serve index.html
-		indexFile := filepath.Join("dist", "index.html")
-		http.ServeFile(w, r, indexFile)
+		// If file not found, serve index.html for SPA routing
+		content, err := fs.ReadFile(distFS, "index.html")
+		if err != nil {
+			http.Error(w, "Internal Server Error", http.StatusInternalServerError)
+			return
+		}
+		w.Header().Set("Content-Type", "text/html")
+		w.Write(content)
 	})
 
-	// Start the server
 	fmt.Println("Server running on http://localhost:3001")
 	if err := http.ListenAndServe(":3001", mux); err != nil {
 		log.Fatal(err)
@@ -146,14 +163,23 @@ func listFiles(w http.ResponseWriter, r *http.Request) {
 
 	absPath, err := toAbsolutePath(relPath)
 	if err != nil {
-		http.Error(w, "Invalid path", http.StatusBadRequest)
+		log.Println("Invalid path:", err)
+		w.WriteHeader(http.StatusBadRequest)
+		json.NewEncoder(w).Encode(map[string]string{"error": "Invalid path"})
 		return
 	}
 
 	files, err := ioutil.ReadDir(absPath)
 	if err != nil {
-		http.Error(w, "Failed to read directory", http.StatusInternalServerError)
 		log.Println("Error reading directory:", err)
+		w.WriteHeader(http.StatusInternalServerError)
+		json.NewEncoder(w).Encode(map[string]string{"error": "Failed to read directory"})
+		return
+	}
+
+	if len(files) == 0 {
+		w.WriteHeader(http.StatusNoContent)
+		json.NewEncoder(w).Encode(map[string]string{"error": "Directory is empty"})
 		return
 	}
 
