@@ -12,7 +12,12 @@ const videoPath = ref(route.query.path as string);
 const segments = ref<VideoSegment[]>([{ startTime: '00:00:00', endTime: '00:00:00' }]);
 const artRef = ref<HTMLDivElement | null>(null);
 const loading = ref(false);
+const snackbar = ref({ show: false, message: '', color: '' });
 let art: Artplayer | null = null;
+
+const showSnackbar = (message: string, color: string) => {
+  snackbar.value = { show: true, message, color };
+};
 
 onMounted(() => {
   if (!videoPath.value) {
@@ -44,6 +49,7 @@ onMounted(() => {
       autoOrientation: true,
       theme: '#6750A4'
     });
+    //showSnackbar('Video player initialized', 'success');
   }
 });
 
@@ -84,9 +90,10 @@ const saveSegments = async () => {
       segments: segments.value
     });
   } catch (error) {
-    console.error('Error saving video segments:', error);
+    showSnackbar('Error saving video segments', 'error');
   } finally {
     loading.value = false;
+    showSnackbar('Video segments saved successfully', 'success');
   }
 };
 
@@ -100,6 +107,7 @@ const handlePathNavigation = (path: string) => {
   } else {
     const parentDir = videoPath.value.split('/').slice(0, -1).join('/');
     router.push(`/?path=${encodeURIComponent(parentDir)}`);
+    console.log(router);
   }
 };
 </script>
@@ -203,6 +211,10 @@ const handlePathNavigation = (path: string) => {
         </v-btn>
       </v-card-actions>
     </v-card>
+
+    <v-snackbar v-model="snackbar.show" :color="snackbar.color">
+      {{ snackbar.message }}
+    </v-snackbar>
   </v-container>
 </template>
 

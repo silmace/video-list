@@ -43,8 +43,13 @@ type VideoEditRequest struct {
 
 // Convert absolute path to relative path
 func toRelativePath(path string) string {
-	rel, err := filepath.Rel(BaseDir, path)
+	// Clean and standardize the path
+	path = filepath.Clean(filepath.FromSlash(path))
+	baseDir := filepath.Clean(filepath.FromSlash(BaseDir))
+
+	rel, err := filepath.Rel(baseDir, path)
 	if err != nil {
+		log.Println("Error converting to relative path:", err)
 		return ""
 	}
 	return filepath.ToSlash(rel)
@@ -68,6 +73,11 @@ func main() {
 	// Define the flag for BaseDir
 	flag.StringVar(&BaseDir, "baseDir", "/www", "Base directory to serve files from")
 	flag.Parse()
+
+	// Ensure BaseDir is an absolute path
+	if !filepath.IsAbs(BaseDir) {
+		log.Fatal("BaseDir must be an absolute path")
+	}
 
 	// Initialize logging
 	logFile, err := os.OpenFile("server.log", os.O_CREATE|os.O_APPEND|os.O_WRONLY, 0644)

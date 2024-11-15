@@ -13,6 +13,7 @@ const showImageDialog = ref(false);
 const selectedImage = ref<FileItem | null>(null);
 const loading = ref(false);
 const search = ref('');
+const snackbar = ref({ show: false, message: '', color: '' });
 
 const fetchFiles = async (path: string = '/') => {
   loading.value = true;
@@ -22,7 +23,7 @@ const fetchFiles = async (path: string = '/') => {
     currentPath.value = path;
     router.replace({ query: { path } });
   } catch (error) {
-    console.error('Error fetching files:', error);
+    showSnackbar('Error fetching files', 'error');
   } finally {
     loading.value = false;
   }
@@ -31,9 +32,11 @@ const fetchFiles = async (path: string = '/') => {
 const handleFileClick = async (file: FileItem) => {
   if (file.isDirectory) {
     const newPath = `${currentPath.value}${file.name}/`;
+    console.log('newPath', newPath);
     fetchFiles(newPath);
   } else if (file.name.match(/\.(mp4|webm|mov)$/i)) {
     router.push(`/edit?path=${encodeURIComponent(file.path)}`);
+    console.log('encoded path for video', encodeURIComponent(file.path));
   } else if (file.name.match(/\.(jpg|jpeg|png|gif|webp|svg)$/i)) {
     selectedImage.value = file;
     showImageDialog.value = true;
@@ -50,8 +53,9 @@ const handleFileClick = async (file: FileItem) => {
       link.click();
       link.remove();
       window.URL.revokeObjectURL(url);
+      showSnackbar('File downloaded successfully', 'success');
     } catch (error) {
-      console.error('Error downloading file:', error);
+      showSnackbar('Error downloading file', 'error');
     }
   }
 };
@@ -62,8 +66,9 @@ const deleteFile = async (file: FileItem, event: Event) => {
     try {
       await axios.delete(`/api/files?path=${encodeURIComponent(file.path)}`);
       fetchFiles(currentPath.value);
+      showSnackbar('File deleted successfully', 'success');
     } catch (error) {
-      console.error('Error deleting file:', error);
+      showSnackbar('Error deleting file', 'error');
     }
   }
 };
@@ -91,6 +96,10 @@ const getFileIcon = (file: FileItem): string => {
   return 'mdi-file';
 };
 
+const showSnackbar = (message: string, color: string) => {
+  snackbar.value = { show: true, message, color };
+};
+
 onMounted(() => {
   fetchFiles(currentPath.value);
 });
@@ -115,6 +124,7 @@ onMounted(() => {
         :items="files"
         :loading="loading"
         :search="search"
+        :items-per-page="50"
         hover
       >
         <template v-slot:item="{ item }">
@@ -180,5 +190,9 @@ onMounted(() => {
         </v-card-text>
       </v-card>
     </v-dialog>
+
+    <v-snackbar v-model="snackbar.show" :color="snackbar.color" top right>
+      {{ snackbar.message }}
+    </v-snackbar>
   </v-container>
 </template>
