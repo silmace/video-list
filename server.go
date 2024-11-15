@@ -159,7 +159,7 @@ func listFiles(w http.ResponseWriter, r *http.Request) {
 	if err != nil {
 		log.Println("Error reading directory:", err)
 		w.WriteHeader(http.StatusInternalServerError)
-		json.NewEncoder(w).Encode(map[string]string{"error": "Failed to read directory"})
+		json.NewEncoder(w).Encode(map[string]string{"error": "Failed to read directory" + absPath})
 		return
 	}
 
