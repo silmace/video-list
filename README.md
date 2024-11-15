@@ -16,7 +16,7 @@ This is a simple Go server for provide file list, media streaming, and video edi
     npm install
     npm vite build
     go mod tidy
-    go build -o video-list
+    go build -o video-list ./server.go
     
 ## Usage
 
