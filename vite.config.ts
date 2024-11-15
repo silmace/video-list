@@ -9,6 +9,8 @@ export default defineConfig({
         target: 'http://localhost:3000',
         changeOrigin: true
       }
-    }
+    },
+    // Add history fallback support
+    historyApiFallback: true
   }
 })

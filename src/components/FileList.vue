@@ -1,5 +1,5 @@
 <script setup lang="ts">
-import { ref, onMounted } from 'vue';
+import { ref, onMounted, watch } from 'vue';
 import { useRoute, useRouter } from 'vue-router';
 import type { FileItem } from '../types';
 import axios from 'axios';
@@ -8,12 +8,20 @@ import PathBreadcrumb from './PathBreadcrumb.vue';
 const files = ref<FileItem[]>([]);
 const router = useRouter();
 const route = useRoute();
-const currentPath = ref(route.query.path as string || '/');
+const currentPath = ref('/');
 const showImageDialog = ref(false);
 const selectedImage = ref<FileItem | null>(null);
 const loading = ref(false);
 const search = ref('');
 const snackbar = ref({ show: false, message: '', color: '' });
+
+const getPathFromRoute = () => {
+  if (!route.params.pathMatch) return '/';
+  const path = Array.isArray(route.params.pathMatch)
+    ? route.params.pathMatch.join('/')
+    : route.params.pathMatch;
+  return `/${path}`;
+};
 
 const fetchFiles = async (path: string = '/') => {
   loading.value = true;
@@ -21,7 +29,11 @@ const fetchFiles = async (path: string = '/') => {
     const response = await axios.get(`/api/files?path=${encodeURIComponent(path)}`);
     files.value = response.data;
     currentPath.value = path;
-    router.replace({ query: { path } });
+    if (path === '/') {
+      router.push('/');
+    } else {
+      router.push(path);
+    }
   } catch (error) {
     showSnackbar('Error fetching files', 'error');
   } finally {
@@ -31,12 +43,11 @@ const fetchFiles = async (path: string = '/') => {
 
 const handleFileClick = async (file: FileItem) => {
   if (file.isDirectory) {
-    const newPath = `${currentPath.value}${file.name}/`;
-    console.log('newPath', newPath);
+    const newPath = `${currentPath.value}${currentPath.value.endsWith('/') ? '' : '/'}${file.name}/`;
     fetchFiles(newPath);
   } else if (file.name.match(/\.(mp4|webm|mov)$/i)) {
-    router.push(`/edit?path=${encodeURIComponent(file.path)}`);
-    console.log('encoded path for video', encodeURIComponent(file.path));
+    const videoPath = file.path.startsWith('/') ? file.path.slice(1) : file.path;
+    router.push(`/edit/${videoPath}`);
   } else if (file.name.match(/\.(jpg|jpeg|png|gif|webp|svg)$/i)) {
     selectedImage.value = file;
     showImageDialog.value = true;
@@ -100,8 +111,16 @@ const showSnackbar = (message: string, color: string) => {
   snackbar.value = { show: true, message, color };
 };
 
+watch(() => route.params.pathMatch, () => {
+  const path = getPathFromRoute();
+  if (path !== currentPath.value) {
+    fetchFiles(path);
+  }
+}, { immediate: true });
+
 onMounted(() => {
-  fetchFiles(currentPath.value);
+  const path = getPathFromRoute();
+  fetchFiles(path);
 });
 </script>
 

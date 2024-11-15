@@ -6,7 +6,6 @@ import (
 	"errors"
 	"flag"
 	"fmt"
-	"io/fs"
 	"io/ioutil"
 	"log"
 	"net/http"
@@ -88,19 +87,42 @@ func main() {
 
 	log.SetOutput(logFile)
 
-	http.HandleFunc("/api/files", handleFiles)
-	http.HandleFunc("/api/media", handleMediaStream)
-	http.HandleFunc("/api/edit-video", handleEditVideo)
+	// Create a new mux for better route handling
+	mux := http.NewServeMux()
 
-	// Serve the Vite front-end static files from embedded files
-	subFS, err := fs.Sub(embeddedFiles, "dist")
-	if err != nil {
+	// API routes
+	mux.HandleFunc("/api/files", handleFiles)
+	mux.HandleFunc("/api/media", handleMediaStream)
+	mux.HandleFunc("/api/edit-video", handleEditVideo)
+
+	// Serve static files from the dist directory
+	distFS := http.FileServer(http.Dir("dist"))
+
+	// Handle all other routes
+	mux.HandleFunc("/", func(w http.ResponseWriter, r *http.Request) {
+		// If it's an API request, skip
+		if strings.HasPrefix(r.URL.Path, "/api/") {
+			http.NotFound(w, r)
+			return
+		}
+
+		// Try to serve the static file first
+		filePath := filepath.Join("dist", r.URL.Path)
+		if _, err := os.Stat(filePath); err == nil {
+			distFS.ServeHTTP(w, r)
+			return
+		}
+
+		// For all other paths, serve index.html
+		indexFile := filepath.Join("dist", "index.html")
+		http.ServeFile(w, r, indexFile)
+	})
+
+	// Start the server
+	fmt.Println("Server running on http://localhost:3001")
+	if err := http.ListenAndServe(":3001", mux); err != nil {
 		log.Fatal(err)
 	}
-	http.Handle("/", http.FileServer(http.FS(subFS)))
-
-	fmt.Println("Server running on http://localhost:3001")
-	http.ListenAndServe(":3001", nil)
 }
 
 // Handle listing and deleting files
@@ -147,6 +169,7 @@ func listFiles(w http.ResponseWriter, r *http.Request) {
 		fileList = append(fileList, fileInfo)
 	}
 
+	w.Header().Set("Content-Type", "application/json")
 	json.NewEncoder(w).Encode(fileList)
 }
 
@@ -171,7 +194,7 @@ func deleteFile(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	w.WriteHeader(http.StatusOK)
+	w.Header().Set("Content-Type", "application/json")
 	w.Write([]byte(`{"success": true}`))
 }
 
@@ -248,6 +271,7 @@ func handleEditVideo(w http.ResponseWriter, r *http.Request) {
 		}
 
 		log.Printf("Video edited successfully, output: %s", outputPath)
+		w.Header().Set("Content-Type", "application/json")
 		w.Write([]byte(fmt.Sprintf(`{"success": true, "output": "%s"}`, toRelativePath(outputPath))))
 	} else {
 		// Handle multiple segments
@@ -268,6 +292,7 @@ func handleEditVideo(w http.ResponseWriter, r *http.Request) {
 		}
 
 		log.Printf("Video merged successfully, output: %s", outputPath)
+		w.Header().Set("Content-Type", "application/json")
 		w.Write([]byte(fmt.Sprintf(`{"success": true, "output": "%s"}`, toRelativePath(outputPath))))
 	}
 }
@@ -323,10 +348,10 @@ func processSegment(inputPath, outputPath, startTime, duration string) error {
 }
 
 func processSegments(inputPath string, segments []Segment) ([]string, error) {
-	var segmentFiles []string
 	tempDir := filepath.Join(filepath.Dir(inputPath), ".temp")
 	os.MkdirAll(tempDir, 0755)
 
+	var segmentFiles []string
 	for i, segment := range segments {
 		outputPath := filepath.Join(tempDir, fmt.Sprintf("segment_%d.mp4", i))
 		duration, err := getTimeDifference(segment.StartTime, segment.EndTime)

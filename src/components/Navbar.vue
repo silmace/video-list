@@ -24,7 +24,7 @@ const navigateHome = () => {
 </script>
 
 <template>
-  <v-app-bar :color="isDark ? 'surface' : 'success'" elevation="2">
+  <v-app-bar :color="isDark ? 'surface' : 'primary'" elevation="2">
     <!-- <template v-slot:prepend>
       <v-app-bar-nav-icon></v-app-bar-nav-icon>
     </template> -->

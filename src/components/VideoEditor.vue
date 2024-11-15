@@ -8,18 +8,28 @@ import PathBreadcrumb from './PathBreadcrumb.vue';
 
 const route = useRoute();
 const router = useRouter();
-const videoPath = ref(route.query.path as string);
+const videoPath = ref('');
 const segments = ref<VideoSegment[]>([{ startTime: '00:00:00', endTime: '00:00:00' }]);
 const artRef = ref<HTMLDivElement | null>(null);
 const loading = ref(false);
 const snackbar = ref({ show: false, message: '', color: '' });
 let art: Artplayer | null = null;
 
+const getVideoPath = () => {
+  if (!route.params.pathMatch) return '';
+  const path = Array.isArray(route.params.pathMatch)
+    ? route.params.pathMatch.join('/')
+    : route.params.pathMatch;
+  return `/${path}`;
+};
+
 const showSnackbar = (message: string, color: string) => {
   snackbar.value = { show: true, message, color };
 };
 
 onMounted(() => {
+  videoPath.value = getVideoPath();
+  
   if (!videoPath.value) {
     router.push('/');
     return;
@@ -49,7 +59,6 @@ onMounted(() => {
       autoOrientation: true,
       theme: '#6750A4'
     });
-    //showSnackbar('Video player initialized', 'success');
   }
 });
 
@@ -89,11 +98,11 @@ const saveSegments = async () => {
       videoPath: videoPath.value,
       segments: segments.value
     });
+    showSnackbar('Video segments saved successfully', 'success');
   } catch (error) {
     showSnackbar('Error saving video segments', 'error');
   } finally {
     loading.value = false;
-    showSnackbar('Video segments saved successfully', 'success');
   }
 };
 
@@ -106,8 +115,7 @@ const handlePathNavigation = (path: string) => {
     router.push('/');
   } else {
     const parentDir = videoPath.value.split('/').slice(0, -1).join('/');
-    router.push(`/?path=${encodeURIComponent(parentDir)}`);
-    console.log(router);
+    router.push(parentDir || '/');
   }
 };
 </script>
