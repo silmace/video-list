@@ -1,3 +1,70 @@
-@tailwind base;
-@tailwind components;
-@tailwind utilities;
+@import url('https://fonts.googleapis.com/css2?family=Space+Grotesk:wght@400;500;600;700&family=JetBrains+Mono:wght@400;600&display=swap');
+
+:root {
+	font-family: 'Space Grotesk', 'Segoe UI', sans-serif;
+	--app-bg-1: #f5fbff;
+	--app-bg-2: #e4f2ff;
+	--app-bg-3: #fff8ef;
+	--glass-surface: rgba(255, 255, 255, 0.55);
+	--glass-border: rgba(255, 255, 255, 0.72);
+	--glass-shadow: 0 20px 48px rgba(43, 65, 98, 0.16);
+	--glass-appbar-bg: linear-gradient(115deg, rgba(255, 255, 255, 0.52), rgba(255, 255, 255, 0.2));
+	--glass-appbar-border: rgba(255, 255, 255, 0.65);
+	--floating-bg: linear-gradient(120deg, rgba(255, 255, 255, 0.68), rgba(255, 255, 255, 0.34));
+	--floating-border: rgba(255, 255, 255, 0.5);
+	--floating-shadow: 0 20px 48px rgba(34, 44, 80, 0.2);
+	--selection-row-bg: rgba(45, 156, 219, 0.14);
+}
+
+body.theme-dark {
+	--app-bg-1: #0d1622;
+	--app-bg-2: #132437;
+	--app-bg-3: #1f2d3a;
+	--glass-surface: rgba(17, 28, 40, 0.64);
+	--glass-border: rgba(173, 216, 255, 0.18);
+	--glass-shadow: 0 22px 56px rgba(3, 7, 13, 0.5);
+	--glass-appbar-bg: linear-gradient(115deg, rgba(19, 33, 48, 0.78), rgba(19, 33, 48, 0.52));
+	--glass-appbar-border: rgba(173, 216, 255, 0.2);
+	--floating-bg: linear-gradient(120deg, rgba(18, 31, 44, 0.92), rgba(17, 28, 40, 0.76));
+	--floating-border: rgba(173, 216, 255, 0.28);
+	--floating-shadow: 0 22px 56px rgba(2, 8, 18, 0.52);
+	--selection-row-bg: rgba(137, 194, 255, 0.18);
+}
+
+body {
+	margin: 0;
+	font-family: 'Space Grotesk', 'Segoe UI', sans-serif;
+	background:
+		radial-gradient(circle at 15% 10%, rgba(72, 176, 255, 0.28), transparent 32%),
+		radial-gradient(circle at 88% 18%, rgba(255, 189, 96, 0.24), transparent 30%),
+		radial-gradient(circle at 12% 82%, rgba(45, 212, 191, 0.14), transparent 25%),
+		linear-gradient(140deg, var(--app-bg-1), var(--app-bg-2) 55%, var(--app-bg-3));
+	min-height: 100vh;
+}
+
+code,
+pre {
+	font-family: 'JetBrains Mono', Consolas, monospace;
+}
+
+.app-shell {
+	background: transparent !important;
+}
+
+.app-main {
+	background: transparent !important;
+}
+
+.glass-panel {
+	border-radius: 18px !important;
+	border: 1px solid var(--glass-border) !important;
+	background: var(--glass-surface) !important;
+	backdrop-filter: blur(16px);
+	box-shadow: var(--glass-shadow);
+}
+
+.glass-appbar {
+	border-bottom: 1px solid var(--glass-appbar-border) !important;
+	background: var(--glass-appbar-bg) !important;
+	backdrop-filter: blur(18px);
+}

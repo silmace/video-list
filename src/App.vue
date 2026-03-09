@@ -12,9 +12,9 @@ onMounted(() => {
 </script>
 
 <template>
-  <v-app>
+  <v-app class="app-shell">
     <Navbar />
-    <v-main class="bg-background">
+    <v-main class="app-main">
       <router-view v-slot="{ Component }">
         <v-fade-transition mode="out-in">
           <component :is="Component" />
