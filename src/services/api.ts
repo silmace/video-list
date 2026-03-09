@@ -16,6 +16,15 @@ export const setAuthToken = (token: string): void => {
   }
 };
 
+export const buildMediaUrl = (path: string): string => {
+  const params = new URLSearchParams({ path });
+  const token = getAuthToken();
+  if (token) {
+    params.set('token', token);
+  }
+  return `/api/media?${params.toString()}`;
+};
+
 api.interceptors.request.use((config) => {
   const token = getAuthToken();
   if (token) {

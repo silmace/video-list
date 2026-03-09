@@ -64,19 +64,19 @@ onMounted(async () => {
       <v-btn
         v-if="!authState.authEnabled.value || authState.authenticated.value"
         variant="text"
-        prepend-icon="mdi-progress-clock"
+        icon="mdi-progress-clock"
+        :title="t('tasks')"
+        :aria-label="t('tasks')"
         @click="navigateTasks"
-      >
-        {{ t('tasks') }}
-      </v-btn>
+      />
       <v-btn
         v-if="!authState.authEnabled.value || authState.authenticated.value"
         variant="text"
-        prepend-icon="mdi-cog-outline"
+        icon="mdi-cog-outline"
+        :title="t('settings')"
+        :aria-label="t('settings')"
         @click="navigateSettings"
-      >
-        {{ t('settings') }}
-      </v-btn>
+      />
       <v-btn
         :icon="isDark ? 'mdi-weather-night' : 'mdi-weather-sunny'"
         @click="isDark = !isDark"

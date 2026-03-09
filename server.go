@@ -121,6 +121,11 @@ type CreateFolderRequest struct {
 	Name string `json:"name"`
 }
 
+type RenameFileRequest struct {
+	Path string `json:"path"`
+	Name string `json:"name"`
+}
+
 type Task struct {
 	ID          string    `json:"id"`
 	Type        string    `json:"type"`
@@ -332,6 +337,7 @@ func main() {
 	mux.HandleFunc("/api/settings", withAuth(handleSettings))
 	mux.HandleFunc("/api/files", withAuth(handleFiles))
 	mux.HandleFunc("/api/files/mkdir", withAuth(handleCreateFolder))
+	mux.HandleFunc("/api/files/rename", withAuth(handleRenameFile))
 	mux.HandleFunc("/api/files/upload", withAuth(handleUploadFile))
 	mux.HandleFunc("/api/media", withAuth(handleMediaStream))
 	mux.HandleFunc("/api/edit-video", withAuth(handleEditVideo))
@@ -719,7 +725,7 @@ func withAuth(next http.HandlerFunc) http.HandlerFunc {
 			return
 		}
 
-		token := extractBearerToken(r)
+		token := extractAuthToken(r)
 		if token == "" || !validateSessionToken(token) {
 			writeError(w, http.StatusUnauthorized, "unauthorized")
 			return
@@ -845,6 +851,77 @@ func handleUploadFile(w http.ResponseWriter, r *http.Request) {
 
 	if _, err := io.Copy(dst, src); err != nil {
 		writeError(w, http.StatusInternalServerError, "failed to save uploaded file")
+		return
+	}
+
+	writeJSON(w, http.StatusOK, map[string]any{
+		"success": true,
+		"path":    toRelativePath(targetPath),
+	})
+}
+
+func handleRenameFile(w http.ResponseWriter, r *http.Request) {
+	if r.Method != http.MethodPost {
+		writeError(w, http.StatusMethodNotAllowed, "method not allowed")
+		return
+	}
+
+	var req RenameFileRequest
+	if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
+		writeError(w, http.StatusBadRequest, "invalid request payload")
+		return
+	}
+
+	if strings.TrimSpace(req.Path) == "" {
+		writeError(w, http.StatusBadRequest, "path is required")
+		return
+	}
+
+	newName := strings.TrimSpace(req.Name)
+	if newName == "" {
+		writeError(w, http.StatusBadRequest, "name is required")
+		return
+	}
+	if strings.Contains(newName, "/") || strings.Contains(newName, "\\") {
+		writeError(w, http.StatusBadRequest, "name is invalid")
+		return
+	}
+
+	absPath, err := toAbsolutePath(req.Path)
+	if err != nil {
+		writeError(w, http.StatusBadRequest, "invalid path")
+		return
+	}
+	if _, err := os.Stat(absPath); err != nil {
+		if os.IsNotExist(err) {
+			writeError(w, http.StatusNotFound, "file not found")
+			return
+		}
+		writeError(w, http.StatusInternalServerError, "failed to access file")
+		return
+	}
+
+	targetPath := filepath.Clean(filepath.Join(filepath.Dir(absPath), newName))
+	if !isPathWithinBase(targetPath) {
+		writeError(w, http.StatusBadRequest, "invalid path")
+		return
+	}
+
+	if absPath == targetPath {
+		writeJSON(w, http.StatusOK, map[string]any{"success": true, "path": toRelativePath(absPath)})
+		return
+	}
+
+	if _, err := os.Stat(targetPath); err == nil {
+		writeError(w, http.StatusConflict, "target already exists")
+		return
+	} else if !os.IsNotExist(err) {
+		writeError(w, http.StatusInternalServerError, "failed to validate target")
+		return
+	}
+
+	if err := os.Rename(absPath, targetPath); err != nil {
+		writeError(w, http.StatusInternalServerError, "failed to rename")
 		return
 	}
 
@@ -1534,6 +1611,19 @@ func extractBearerToken(r *http.Request) string {
 		return ""
 	}
 	return strings.TrimSpace(parts[1])
+}
+
+func extractAuthToken(r *http.Request) string {
+	if token := extractBearerToken(r); token != "" {
+		return token
+	}
+
+	// Media requests from <img>/<video> cannot attach Authorization headers reliably.
+	if r.Method == http.MethodGet && r.URL.Path == "/api/media" {
+		return strings.TrimSpace(r.URL.Query().Get("token"))
+	}
+
+	return ""
 }
 
 func generateID(prefix string) string {

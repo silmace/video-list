@@ -1,7 +1,7 @@
 # Video List
 
 Video List is a file manager with media streaming and video editing task support.
-The backend is written in Go, and the frontend is built with Vue + Vite.
+This project is designed to be easily deployed on remote devices such as NAS servers. It allows you to conveniently edit and manage video files stored remotely.
 
 ## Dependencies
 

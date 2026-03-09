@@ -2,7 +2,7 @@
 import { ref, onMounted, onUnmounted } from 'vue';
 import { useRoute, useRouter } from 'vue-router';
 import type { VideoSegment } from '../types';
-import { api } from '../services/api';
+import { api, buildMediaUrl } from '../services/api';
 import Artplayer from 'artplayer';
 import PathBreadcrumb from './PathBreadcrumb.vue';
 import { useLocale } from '../composables/useLocale';
@@ -46,7 +46,7 @@ onMounted(() => {
   if (artRef.value) {
     art = new Artplayer({
       container: artRef.value,
-      url: `/api/media?path=${encodeURIComponent(videoPath.value)}`,
+      url: buildMediaUrl(videoPath.value),
       volume: 0.5,
       autoplay: false,
       pip: true,

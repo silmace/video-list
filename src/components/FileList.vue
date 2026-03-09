@@ -17,6 +17,7 @@ import {
   Folder,
   FolderPlus,
   MoveRight,
+  PencilLine,
   RefreshCw,
   Search,
   Upload,
@@ -25,7 +26,7 @@ import {
   ZoomOut,
 } from 'lucide-vue-next';
 import type { FileItem, TaskItem } from '../types';
-import { api } from '../services/api';
+import { api, buildMediaUrl } from '../services/api';
 import PathBreadcrumb from './PathBreadcrumb.vue';
 import { authState } from '../composables/useAuth';
 import { useLocale } from '../composables/useLocale';
@@ -54,6 +55,10 @@ const submittingMoveTask = ref(false);
 const moveDestination = ref('/');
 const showCreateFolderDialog = ref(false);
 const newFolderName = ref('');
+const showRenameDialog = ref(false);
+const renameTargetPath = ref('');
+const renameName = ref('');
+const submittingRename = ref(false);
 const showImageDialog = ref(false);
 const selectedImageIndex = ref(0);
 const previewScale = ref(1);
@@ -64,6 +69,13 @@ let snackbarTimer: number | null = null;
 
 const selectedCount = computed(() => selectedPaths.value.size);
 const hasSelection = computed(() => selectedCount.value > 0);
+const selectedSingleItem = computed(() => {
+  if (selectedCount.value !== 1) {
+    return null;
+  }
+  const [singlePath] = Array.from(selectedPaths.value);
+  return files.value.find((item) => item.path === singlePath) || null;
+});
 
 const displayedFiles = computed(() => {
   const keyword = search.value.trim().toLowerCase();
@@ -82,6 +94,7 @@ const displayedFiles = computed(() => {
 const selectedItems = computed(() => displayedFiles.value.filter((item) => selectedPaths.value.has(item.path)));
 const imageFiles = computed(() => displayedFiles.value.filter((file) => isImage(file.name) && !file.isDirectory));
 const selectedImage = computed(() => imageFiles.value[selectedImageIndex.value] || null);
+const selectedImageUrl = computed(() => (selectedImage.value ? buildMediaUrl(selectedImage.value.path) : ''));
 
 const accentColor = computed(() => {
   if (selectedItems.value.length > 0) {
@@ -231,11 +244,7 @@ const openFile = async (file: FileItem) => {
 const onFileClick = async (file: FileItem, event: MouseEvent) => {
   const selectIntent = hasSelection.value || event.ctrlKey || event.metaKey || event.shiftKey;
   if (selectIntent) {
-    if (selectedPaths.value.has(file.path)) {
-      selectedPaths.value.delete(file.path);
-    } else {
-      selectedPaths.value.add(file.path);
-    }
+    toggleSelection(file.path);
     return;
   }
 
@@ -243,6 +252,13 @@ const onFileClick = async (file: FileItem, event: MouseEvent) => {
 };
 
 const isSelected = (file: FileItem) => selectedPaths.value.has(file.path);
+const toggleSelection = (filePath: string) => {
+  if (selectedPaths.value.has(filePath)) {
+    selectedPaths.value.delete(filePath);
+    return;
+  }
+  selectedPaths.value.add(filePath);
+};
 const clearSelection = () => selectedPaths.value.clear();
 
 const selectAllVisible = () => {
@@ -450,6 +466,43 @@ const createFolder = async () => {
   }
 };
 
+const openRenameDialog = (file: FileItem) => {
+  renameTargetPath.value = file.path;
+  renameName.value = file.name;
+  showRenameDialog.value = true;
+};
+
+const openRenameDialogForSelection = () => {
+  const item = selectedSingleItem.value;
+  if (!item) {
+    showSnackbar(t('renameSelectionHint'), 'warning');
+    return;
+  }
+  openRenameDialog(item);
+};
+
+const renameFile = async () => {
+  const nextName = renameName.value.trim();
+  if (!renameTargetPath.value || !nextName) {
+    return;
+  }
+
+  submittingRename.value = true;
+  try {
+    await api.post('/api/files/rename', {
+      path: renameTargetPath.value,
+      name: nextName,
+    });
+    showRenameDialog.value = false;
+    showSnackbar(t('renameSuccess'), 'success');
+    await fetchFiles(currentPath.value || '/', false);
+  } catch {
+    showSnackbar(t('renameError'), 'error');
+  } finally {
+    submittingRename.value = false;
+  }
+};
+
 const zoomIn = () => {
   previewScale.value = Math.min(3, Number((previewScale.value + 0.2).toFixed(1)));
 };
@@ -560,24 +613,29 @@ onBeforeUnmount(() => {
         <div v-else-if="displayedFiles.length === 0" class="list-empty">{{ t('emptyFolderHint') }}</div>
 
         <div v-else-if="isMobile" class="mobile-card-list">
-          <button
+          <div
             v-for="file in displayedFiles"
             :key="file.path"
-            type="button"
             class="file-mobile-card"
             :class="{ selected: isSelected(file) }"
             @click="onFileClick(file, $event)"
           >
             <div class="file-main" :style="{ '--row-accent': getFileAccent(file) }">
+              <button type="button" class="checkbox-hit" @click.stop="toggleSelection(file.path)">
+                <span class="checkbox-dot" :class="{ checked: isSelected(file) }" />
+              </button>
               <component :is="iconFor(file)" :size="18" />
               <span class="file-name">{{ file.name }}</span>
+              <button type="button" class="icon-action-btn" @click.stop="openRenameDialog(file)">
+                <PencilLine :size="14" />
+              </button>
               <span class="file-tag-dot" :style="{ background: getFileAccent(file) }" />
             </div>
             <div class="file-sub">
               <span>{{ file.isDirectory ? '-' : formatSize(file.size) }}</span>
               <span>{{ formatDate(file.modifiedTime) }}</span>
             </div>
-          </button>
+          </div>
         </div>
 
         <div v-else class="table-wrap">
@@ -595,12 +653,15 @@ onBeforeUnmount(() => {
                   <button
                     type="button"
                     class="checkbox-hit"
-                    @click.stop="isSelected(file) ? selectedPaths.delete(file.path) : selectedPaths.add(file.path)"
+                    @click.stop="toggleSelection(file.path)"
                   >
                     <span class="checkbox-dot" :class="{ checked: isSelected(file) }" />
                   </button>
                   <component :is="iconFor(file)" :size="18" />
                   <span class="file-name">{{ file.name }}</span>
+                  <button type="button" class="icon-action-btn" @click.stop="openRenameDialog(file)">
+                    <PencilLine :size="14" />
+                  </button>
                   <span
                     v-if="getMatchingTag(file)"
                     class="tag-pill"
@@ -640,6 +701,10 @@ onBeforeUnmount(() => {
         <Download :size="14" />
         {{ t('download') }}
       </button>
+      <button type="button" class="shad-btn" :disabled="selectedCount !== 1" @click="openRenameDialogForSelection">
+        <PencilLine :size="14" />
+        {{ t('rename') }}
+      </button>
       <button type="button" class="shad-btn" @click="clearSelection">{{ t('clear') }}</button>
     </motion.div>
 
@@ -673,10 +738,33 @@ onBeforeUnmount(() => {
       </div>
     </div>
 
+    <div v-if="showRenameDialog" class="modal-overlay" @click.self="showRenameDialog = false">
+      <div class="modal-card">
+        <h3>{{ t('rename') }}</h3>
+        <label class="input-shell">
+          <input v-model="renameName" type="text" :placeholder="t('newName')" @keyup.enter="renameFile">
+        </label>
+        <p class="modal-hint">{{ t('renameHint') }}</p>
+        <div class="modal-actions">
+          <button type="button" class="shad-btn" @click="showRenameDialog = false">{{ t('cancel') }}</button>
+          <button type="button" class="shad-btn shad-btn-primary" :disabled="submittingRename" @click="renameFile">
+            {{ t('rename') }}
+          </button>
+        </div>
+      </div>
+    </div>
+
     <div v-if="showImageDialog && selectedImage" class="modal-overlay image-modal" @click.self="closeImageDialog">
       <div class="image-modal-card">
-        <header>
-          <div class="image-name">{{ selectedImage.name }}</div>
+        <header class="image-header">
+          <div class="image-title-wrap">
+            <div class="image-name">{{ selectedImage.name }}</div>
+            <div class="image-inline-meta">
+              <span>{{ selectedImageIndex + 1 }} / {{ imageFiles.length }}</span>
+              <span>{{ formatSize(selectedImage.size) }}</span>
+              <span>{{ formatDate(selectedImage.modifiedTime) }}</span>
+            </div>
+          </div>
           <div class="image-tools">
             <button type="button" class="shad-btn shad-btn-sm" @click="switchImage(-1)">
               <ArrowLeft :size="14" />
@@ -703,13 +791,13 @@ onBeforeUnmount(() => {
         </header>
         <div class="image-viewer">
           <img
-            :src="`/api/media?path=${encodeURIComponent(selectedImage.path)}`"
+            :src="selectedImageUrl"
             :alt="selectedImage.name"
             :class="{ fit: fitToScreen }"
-            :style="{ transform: `scale(${previewScale})` }"
+            :style="{ transform: fitToScreen ? 'none' : `scale(${previewScale})` }"
           >
         </div>
-        <footer>
+        <footer class="image-footer">
           <span>{{ selectedImageIndex + 1 }} / {{ imageFiles.length }}</span>
           <span>{{ formatSize(selectedImage.size) }}</span>
           <span>{{ formatDate(selectedImage.modifiedTime) }}</span>
@@ -923,6 +1011,7 @@ onBeforeUnmount(() => {
   border-radius: 14px;
   padding: 11px;
   text-align: left;
+  cursor: pointer;
 }
 
 .file-mobile-card.selected {
@@ -935,6 +1024,24 @@ onBeforeUnmount(() => {
   align-items: center;
   gap: 8px;
   min-width: 0;
+}
+
+.icon-action-btn {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: 24px;
+  height: 24px;
+  border-radius: 8px;
+  border: 1px solid color-mix(in srgb, var(--surface-row-border) 80%, #94a3b8);
+  background: color-mix(in srgb, var(--surface-row) 90%, transparent);
+  color: var(--text-muted);
+  cursor: pointer;
+}
+
+.icon-action-btn:hover {
+  border-color: color-mix(in srgb, var(--row-accent) 45%, var(--surface-row-border));
+  color: var(--text-body);
 }
 
 .file-sub {
@@ -951,6 +1058,7 @@ onBeforeUnmount(() => {
   left: 50%;
   bottom: 22px;
   transform: translateX(-50%);
+  width: min(920px, calc(100vw - 34px));
   z-index: 25;
   display: flex;
   align-items: center;
@@ -1010,24 +1118,31 @@ onBeforeUnmount(() => {
 }
 
 .image-modal-card {
-  width: min(1200px, 100%);
-  height: min(90vh, 880px);
+  width: min(1240px, 100%);
+  height: min(92vh, 920px);
   display: flex;
   flex-direction: column;
   gap: 10px;
-  border-radius: 18px;
-  border: 1px solid rgba(148, 163, 184, 0.4);
-  background: rgba(2, 6, 23, 0.88);
+  border-radius: 20px;
+  border: 1px solid color-mix(in srgb, var(--accent) 28%, rgba(148, 163, 184, 0.45));
+  background: linear-gradient(140deg, rgba(7, 10, 22, 0.94), rgba(7, 14, 28, 0.9));
   color: #e2e8f0;
-  padding: 12px;
+  padding: 14px;
 }
 
-.image-modal-card header,
-.image-modal-card footer {
+.image-header,
+.image-footer {
   display: flex;
   align-items: center;
   justify-content: space-between;
   gap: 8px;
+}
+
+.image-title-wrap {
+  min-width: 0;
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
 }
 
 .image-name {
@@ -1036,14 +1151,26 @@ onBeforeUnmount(() => {
   white-space: nowrap;
 }
 
+.image-inline-meta {
+  display: inline-flex;
+  align-items: center;
+  gap: 10px;
+  flex-wrap: wrap;
+  font-size: 12px;
+  color: #cbd5e1;
+}
+
 .image-tools {
   display: flex;
   align-items: center;
   gap: 6px;
+  flex-wrap: wrap;
+  justify-content: flex-end;
 }
 
 .image-viewer {
   flex: 1;
+  min-height: 0;
   display: grid;
   place-items: center;
   overflow: auto;
@@ -1052,6 +1179,7 @@ onBeforeUnmount(() => {
 }
 
 .image-viewer img {
+  display: block;
   max-width: none;
   max-height: none;
   transform-origin: center;
@@ -1059,11 +1187,14 @@ onBeforeUnmount(() => {
 }
 
 .image-viewer img.fit {
+  width: 100%;
+  height: 100%;
+  object-fit: contain;
   max-width: 100%;
   max-height: 100%;
 }
 
-.image-modal-card footer {
+.image-footer {
   font-size: 12px;
   color: #cbd5e1;
 }
@@ -1242,7 +1373,7 @@ onBeforeUnmount(() => {
     width: 100%;
   }
 
-  .shad-btn {
+  .hero-controls .shad-btn {
     width: 100%;
     justify-content: center;
   }
@@ -1262,20 +1393,49 @@ onBeforeUnmount(() => {
   }
 
   .floating-action-bar {
-    width: calc(100% - 18px);
-    left: 9px;
-    right: 9px;
-    bottom: 12px;
+    width: auto;
+    left: 10px;
+    right: 10px;
+    bottom: max(10px, env(safe-area-inset-bottom));
     transform: none;
+    border-radius: 14px;
+    padding: 10px;
+    display: grid;
+    grid-template-columns: repeat(2, minmax(0, 1fr));
+    gap: 8px;
+  }
+
+  .selection-count {
+    grid-column: 1 / -1;
+    margin-right: 0;
+  }
+
+  .floating-action-bar .shad-btn {
+    width: 100%;
+    justify-content: center;
   }
 
   .image-modal-card {
     height: 92vh;
+    padding: 10px;
+  }
+
+  .image-header {
+    align-items: flex-start;
+    flex-direction: column;
+  }
+
+  .image-title-wrap {
+    width: 100%;
   }
 
   .image-tools {
-    flex-wrap: wrap;
-    justify-content: flex-end;
+    width: 100%;
+    justify-content: space-between;
+  }
+
+  .image-footer {
+    display: none;
   }
 }
 </style>
