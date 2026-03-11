@@ -93,9 +93,9 @@ onMounted(async () => {
         v-if="authState.authEnabled.value && authState.authenticated.value"
         variant="tonal"
         color="error"
+        :icon="'mdi-logout'"
         @click="doLogout"
       >
-        {{ t('logout') }}
       </v-btn>
     </template>
   </v-app-bar>

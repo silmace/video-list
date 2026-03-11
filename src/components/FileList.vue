@@ -684,8 +684,8 @@ onBeforeUnmount(() => {
     <motion.div
       v-if="hasSelection"
       class="floating-action-bar"
-      :initial="{ opacity: 0, y: 24, x: '-50%' }"
-      :animate="{ opacity: 1, y: 0, x: '-50%' }"
+      :initial="isMobile ? { opacity: 0, y: 24 } : { opacity: 0, y: 24, x: '-50%' }"
+      :animate="isMobile ? { opacity: 1, y: 0 } : { opacity: 1, y: 0, x: '-50%' }"
       :transition="{ type: 'spring', stiffness: 180, damping: 20 }"
     >
       <span class="selection-count">{{ t('selectedCount', { count: selectedCount }) }}</span>
@@ -1058,12 +1058,15 @@ onBeforeUnmount(() => {
   left: 50%;
   bottom: 22px;
   transform: translateX(-50%);
-  width: min(920px, calc(100vw - 34px));
+  box-sizing: border-box;
   z-index: 25;
   display: flex;
   align-items: center;
+  justify-content: center;
   flex-wrap: wrap;
   gap: 8px;
+  width: auto;
+  max-width: calc(100vw - 34px);
   padding: 10px;
   border-radius: 16px;
   border: 1px solid color-mix(in srgb, var(--accent) 32%, var(--floating-border));
@@ -1393,7 +1396,8 @@ onBeforeUnmount(() => {
   }
 
   .floating-action-bar {
-    width: auto;
+    width: calc(100vw - 20px);
+    max-width: calc(100vw - 20px);
     left: 10px;
     right: 10px;
     bottom: max(10px, env(safe-area-inset-bottom));
@@ -1412,6 +1416,7 @@ onBeforeUnmount(() => {
 
   .floating-action-bar .shad-btn {
     width: 100%;
+    min-width: 0;
     justify-content: center;
   }
 
