@@ -39,6 +39,10 @@ const (
 	maxUploadSizeBytes int64      = 1024 << 20
 	maxTaskRuntime                = 4 * time.Hour
 	maxConcurrentTasks            = 2
+
+	loginMaxAttempts  = 10
+	loginWindowDur    = 15 * time.Minute
+	loginLockoutDur   = 15 * time.Minute
 )
 
 const (
@@ -188,7 +192,62 @@ var (
 
 	taskManager = NewTaskManager()
 	taskSlots   = make(chan struct{}, maxConcurrentTasks)
+
+	loginLimiter = newLoginRateLimiter()
 )
+
+type loginAttemptRecord struct {
+	count     int
+	windowEnd time.Time
+	lockedTo  time.Time
+}
+
+type loginRateLimiter struct {
+	mu      sync.Mutex
+	records map[string]*loginAttemptRecord
+}
+
+func newLoginRateLimiter() *loginRateLimiter {
+	return &loginRateLimiter{records: make(map[string]*loginAttemptRecord)}
+}
+
+// allow returns true when the IP is permitted to attempt a login, false when
+// it is currently locked out. On a successful call (return true) the attempt
+// counter is incremented; callers must call recordSuccess to reset after an
+// authenticated login.
+func (l *loginRateLimiter) allow(ip string) bool {
+	l.mu.Lock()
+	defer l.mu.Unlock()
+
+	now := time.Now()
+	rec, ok := l.records[ip]
+	if !ok {
+		rec = &loginAttemptRecord{}
+		l.records[ip] = rec
+	}
+
+	if now.Before(rec.lockedTo) {
+		return false
+	}
+
+	if now.After(rec.windowEnd) {
+		rec.count = 0
+		rec.windowEnd = now.Add(loginWindowDur)
+	}
+
+	rec.count++
+	if rec.count > loginMaxAttempts {
+		rec.lockedTo = now.Add(loginLockoutDur)
+		return false
+	}
+	return true
+}
+
+func (l *loginRateLimiter) recordSuccess(ip string) {
+	l.mu.Lock()
+	defer l.mu.Unlock()
+	delete(l.records, ip)
+}
 
 func NewTaskManager() *TaskManager {
 	return &TaskManager{tasks: make(map[string]*TaskRecord)}
@@ -534,7 +593,7 @@ func saveConfig(path string, cfg AppConfig) error {
 		return err
 	}
 	tempPath := path + ".tmp"
-	if err := os.WriteFile(tempPath, content, 0644); err != nil {
+	if err := os.WriteFile(tempPath, content, 0600); err != nil {
 		return err
 	}
 	return os.Rename(tempPath, path)
@@ -698,6 +757,12 @@ func handleAuthLogin(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
+	clientIP := clientIP(r)
+	if !loginLimiter.allow(clientIP) {
+		writeError(w, http.StatusTooManyRequests, "too many login attempts, please try again later")
+		return
+	}
+
 	var req LoginRequest
 	if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
 		writeError(w, http.StatusBadRequest, "invalid request payload")
@@ -709,6 +774,7 @@ func handleAuthLogin(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
+	loginLimiter.recordSuccess(clientIP)
 	token := createSessionToken()
 	writeJSON(w, http.StatusOK, map[string]any{"success": true, "token": token, "passwordNeeded": true})
 }
@@ -1992,6 +2058,16 @@ func extractAuthToken(r *http.Request) string {
 	return ""
 }
 
+// clientIP extracts the best-effort remote IP address from the request,
+// stripping the port component returned by net.Addr.
+func clientIP(r *http.Request) string {
+	addr := r.RemoteAddr
+	if host, _, ok := strings.Cut(addr, ":"); ok {
+		return host
+	}
+	return addr
+}
+
 func generateID(prefix string) string {
 	raw := make([]byte, 6)
 	_, _ = rand.Read(raw)
@@ -2007,9 +2083,20 @@ func requestIDFromContext(ctx context.Context) string {
 	return ""
 }
 
+func sanitizeRequestID(id string) string {
+	var b strings.Builder
+	for _, r := range id {
+		if r == '\n' || r == '\r' || r == '\x00' {
+			continue
+		}
+		b.WriteRune(r)
+	}
+	return strings.TrimSpace(b.String())
+}
+
 func requestIDMiddleware(next http.Handler) http.Handler {
 	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-		requestID := strings.TrimSpace(r.Header.Get("X-Request-ID"))
+		requestID := sanitizeRequestID(r.Header.Get("X-Request-ID"))
 		if requestID == "" {
 			requestID = generateID("req")
 		}
