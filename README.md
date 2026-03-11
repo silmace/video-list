@@ -28,19 +28,19 @@ go build -o video-list .
 Optional flags:
 
 - `-baseDir`: override base directory at startup
-- `-config`: set custom config file path (YAML)
+- `-config`: set custom config file path (JSON)
 
 Example:
 
 ```bash
-./video-list -baseDir /data/media -config ./config/config.yaml
+./video-list -baseDir /data/media -config ./config/config.json
 ```
 
 ## Config File
 
 - Default config path:
-  - Windows: `%APPDATA%/video-list/config.yaml`
-  - Linux/macOS: `~/.video-list/config.yaml`
+  - Windows: `%APPDATA%/video-list/config.json`
+  - Linux/macOS: `~/.video-list/config.json`
 - If the config file is missing or empty, it is created automatically on startup.
 
 ## GitHub Actions (Auto Build)
