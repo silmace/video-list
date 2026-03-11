@@ -1,4 +1,5 @@
 <script setup lang="ts">
+import { computed } from 'vue';
 import {
   File,
   FileArchive,
@@ -45,6 +46,14 @@ const iconFor = (file: FileItem) => {
   if (type === 'code') return FileCode;
   return File;
 };
+
+const enrichedFiles = computed(() =>
+  props.files.map(file => ({
+    file,
+    tag: props.getMatchingTag(file),
+    accent: props.getFileAccent(file),
+  }))
+);
 </script>
 
 <template>
@@ -60,11 +69,11 @@ const iconFor = (file: FileItem) => {
 
     <div v-else-if="isMobile" class="mobile-cards">
       <article
-        v-for="file in files"
+        v-for="{ file, accent } in enrichedFiles"
         :key="file.path"
         class="mobile-card"
         :class="{ selected: isSelected(file.path) }"
-        :style="{ '--row-accent': getFileAccent(file) }"
+        :style="{ '--row-accent': accent }"
         @click="emit('open', file, $event)"
       >
         <div class="row-main">
@@ -88,11 +97,11 @@ const iconFor = (file: FileItem) => {
       <table class="file-table">
         <tbody>
           <tr
-            v-for="file in files"
+            v-for="{ file, tag, accent } in enrichedFiles"
             :key="file.path"
             class="file-row"
             :class="{ selected: isSelected(file.path) }"
-            :style="{ '--row-accent': getFileAccent(file) }"
+            :style="{ '--row-accent': accent }"
             @click="emit('open', file, $event)"
           >
             <td class="file-name-cell">
@@ -105,11 +114,11 @@ const iconFor = (file: FileItem) => {
                 <PencilLine :size="14" />
               </button>
               <span
-                v-if="getMatchingTag(file)"
+                v-if="tag"
                 class="tag-pill"
-                :style="{ borderColor: getFileAccent(file), color: getFileAccent(file) }"
+                :style="{ borderColor: accent, color: accent }"
               >
-                {{ getMatchingTag(file)?.label }}
+                {{ tag.label }}
               </span>
             </td>
             <td>{{ file.isDirectory ? '-' : formatSize(file.size) }}</td>
