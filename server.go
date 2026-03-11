@@ -260,6 +260,8 @@ func requestIDMiddleware(next http.Handler) http.Handler {
 
 // handleLogin authenticates the user. The login endpoint is rate-limited to
 // prevent brute-force attacks: at most loginMaxAttempts per IP per loginRateWindow.
+// Only r.RemoteAddr is used for rate limiting — X-Forwarded-For is intentionally
+// ignored because it can be forged by clients to bypass the rate limit.
 func handleLogin(w http.ResponseWriter, r *http.Request) {
 	if r.Method != http.MethodPost {
 		http.Error(w, "Method Not Allowed", http.StatusMethodNotAllowed)
@@ -267,10 +269,6 @@ func handleLogin(w http.ResponseWriter, r *http.Request) {
 	}
 
 	ip := r.RemoteAddr
-	if fwd := r.Header.Get("X-Forwarded-For"); fwd != "" {
-		ip = strings.SplitN(fwd, ",", 2)[0]
-	}
-	ip = strings.TrimSpace(ip)
 
 	if !checkLoginRateLimit(ip) {
 		http.Error(w, "Too Many Requests", http.StatusTooManyRequests)
@@ -294,7 +292,7 @@ func handleLogin(w http.ResponseWriter, r *http.Request) {
 
 	log.Printf("Successful login from IP: %s", ip)
 	w.Header().Set("Content-Type", "application/json")
-	w.Write([]byte(`{"success": true}`))
+	_, _ = w.Write([]byte(`{"success": true}`))
 }
 
 // handleSetPassword lets an authenticated user change the server password.
@@ -339,7 +337,7 @@ func handleSetPassword(w http.ResponseWriter, r *http.Request) {
 	}
 
 	w.Header().Set("Content-Type", "application/json")
-	w.Write([]byte(`{"success": true}`))
+	_, _ = w.Write([]byte(`{"success": true}`))
 }
 
 func handleFiles(w http.ResponseWriter, r *http.Request) {
