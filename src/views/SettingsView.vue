@@ -1,23 +1,11 @@
 <script setup lang="ts">
 import { onMounted, ref } from 'vue';
-import { api } from '../services/api';
 import { checkAuthStatus } from '../composables/useAuth';
 import { useLocale, type AppLocale } from '../composables/useLocale';
 import { useFileVisuals } from '../composables/useFileVisuals';
-
-interface SettingsResponse {
-  success: boolean;
-  settings: {
-    baseDir: string;
-    videoOutputDir: string;
-    authEnabled: boolean;
-    logDir: string;
-    logLevel: string;
-    logRotationHours: number;
-    logMaxAgeDays: number;
-    taskPollIntervalMs: number;
-  };
-}
+import type { VideoCodecOption } from '../types';
+import { fetchSettings, updateSettings } from '../services/settings';
+import { fetchVideoOptions } from '../services/video';
 
 const loading = ref(false);
 const saving = ref(false);
@@ -33,6 +21,7 @@ const taskPollIntervalMs = ref(1500);
 const currentPassword = ref('');
 const newPassword = ref('');
 const authEnabled = ref(false);
+const codecOptions = ref<VideoCodecOption[]>([]);
 const { t, locale, localeOptions, setLocale } = useLocale();
 const { tagList, addTag, removeTag, resetTags } = useFileVisuals();
 const newTagLabel = ref('');
@@ -72,15 +61,15 @@ const createCustomTag = () => {
 const loadSettings = async () => {
   loading.value = true;
   try {
-    const response = await api.get<SettingsResponse>('/api/settings');
-    baseDir.value = response.data.settings.baseDir;
-    videoOutputDir.value = response.data.settings.videoOutputDir;
-    logDir.value = response.data.settings.logDir;
-    logLevel.value = response.data.settings.logLevel;
-    logRotationHours.value = response.data.settings.logRotationHours;
-    logMaxAgeDays.value = response.data.settings.logMaxAgeDays;
-    taskPollIntervalMs.value = response.data.settings.taskPollIntervalMs;
-    authEnabled.value = response.data.settings.authEnabled;
+    const settings = await fetchSettings();
+    baseDir.value = settings.baseDir;
+    videoOutputDir.value = settings.videoOutputDir;
+    logDir.value = settings.logDir;
+    logLevel.value = settings.logLevel;
+    logRotationHours.value = settings.logRotationHours;
+    logMaxAgeDays.value = settings.logMaxAgeDays;
+    taskPollIntervalMs.value = settings.taskPollIntervalMs;
+    authEnabled.value = settings.authEnabled;
   } catch {
     showSnackbar(t('settingsLoadError'), 'error');
   } finally {
@@ -91,7 +80,7 @@ const loadSettings = async () => {
 const saveSettings = async () => {
   saving.value = true;
   try {
-    await api.put('/api/settings', {
+    await updateSettings({
       baseDir: baseDir.value,
       videoOutputDir: videoOutputDir.value,
       logDir: logDir.value,
@@ -115,11 +104,21 @@ const saveSettings = async () => {
   }
 };
 
-onMounted(loadSettings);
+const loadCodecOptions = async () => {
+  try {
+    codecOptions.value = await fetchVideoOptions();
+  } catch {
+    codecOptions.value = [];
+  }
+};
+
+onMounted(async () => {
+  await Promise.all([loadSettings(), loadCodecOptions()]);
+});
 </script>
 
 <template>
-  <v-container class="pa-4">
+  <v-container class="app-page">
     <v-card class="glass-panel pa-4">
       <v-card-title class="text-h5">{{ t('settingsTitle') }}</v-card-title>
       <v-card-subtitle class="mb-4">{{ t('settingsSubtitle') }}</v-card-subtitle>
@@ -243,6 +242,20 @@ onMounted(loadSettings);
       </div>
 
       <v-btn variant="text" color="warning" @click="resetTags">{{ t('resetDefaultTags') }}</v-btn>
+
+      <v-divider class="my-6" />
+      <div class="text-subtitle-1 mb-2">{{ t('encoderCapabilitiesTitle') }}</div>
+      <div class="text-medium-emphasis mb-4">{{ t('encoderCapabilitiesSubtitle') }}</div>
+      <div class="d-flex flex-wrap ga-2">
+        <v-chip
+          v-for="codec in codecOptions"
+          :key="codec.id"
+          :color="codec.available ? 'success' : 'warning'"
+          variant="tonal"
+        >
+          {{ codec.label }} · {{ codec.available ? t('available') : t('unavailable') }}
+        </v-chip>
+      </div>
     </v-card>
 
     <v-snackbar v-model="snackbar.show" :color="snackbar.color">

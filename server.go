@@ -15,6 +15,7 @@ import (
 	"net/http"
 	"os"
 	"os/exec"
+	"path"
 	"path/filepath"
 	"runtime"
 	"sort"
@@ -33,8 +34,11 @@ var embeddedFiles embed.FS
 type contextKey string
 
 const (
-	requestIDKey contextKey = "request_id"
-	tokenTTL                = 24 * time.Hour
+	requestIDKey       contextKey = "request_id"
+	tokenTTL                      = 24 * time.Hour
+	maxUploadSizeBytes int64      = 1024 << 20
+	maxTaskRuntime                = 4 * time.Hour
+	maxConcurrentTasks            = 2
 )
 
 const (
@@ -103,8 +107,10 @@ type Segment struct {
 }
 
 type VideoEditRequest struct {
-	VideoPath string    `json:"videoPath"`
-	Segments  []Segment `json:"segments"`
+	VideoPath  string    `json:"videoPath"`
+	Segments   []Segment `json:"segments"`
+	ExportMode string    `json:"exportMode,omitempty"`
+	VideoCodec string    `json:"videoCodec,omitempty"`
 }
 
 type BatchDeleteRequest struct {
@@ -112,6 +118,11 @@ type BatchDeleteRequest struct {
 }
 
 type BatchMoveRequest struct {
+	Paths       []string `json:"paths"`
+	Destination string   `json:"destination"`
+}
+
+type BatchCopyRequest struct {
 	Paths       []string `json:"paths"`
 	Destination string   `json:"destination"`
 }
@@ -124,6 +135,15 @@ type CreateFolderRequest struct {
 type RenameFileRequest struct {
 	Path string `json:"path"`
 	Name string `json:"name"`
+}
+
+type VideoCodecOption struct {
+	ID          string `json:"id"`
+	Label       string `json:"label"`
+	Description string `json:"description"`
+	Container   string `json:"container"`
+	Mode        string `json:"mode"`
+	Available   bool   `json:"available"`
 }
 
 type Task struct {
@@ -167,6 +187,7 @@ var (
 	sessions  = make(map[string]time.Time)
 
 	taskManager = NewTaskManager()
+	taskSlots   = make(chan struct{}, maxConcurrentTasks)
 )
 
 func NewTaskManager() *TaskManager {
@@ -341,12 +362,14 @@ func main() {
 	mux.HandleFunc("/api/files/upload", withAuth(handleUploadFile))
 	mux.HandleFunc("/api/media", withAuth(handleMediaStream))
 	mux.HandleFunc("/api/edit-video", withAuth(handleEditVideo))
+	mux.HandleFunc("/api/video/options", withAuth(handleVideoOptions))
 
 	mux.HandleFunc("/api/tasks", withAuth(handleTaskList))
 	mux.HandleFunc("/api/tasks/", withAuth(handleTaskByID))
 	mux.HandleFunc("/api/tasks/video", withAuth(handleCreateVideoTask))
 	mux.HandleFunc("/api/tasks/batch-delete", withAuth(handleCreateBatchDeleteTask))
 	mux.HandleFunc("/api/tasks/batch-move", withAuth(handleCreateBatchMoveTask))
+	mux.HandleFunc("/api/tasks/batch-copy", withAuth(handleCreateBatchCopyTask))
 
 	distFS, err := fs.Sub(embeddedFiles, "dist")
 	if err != nil {
@@ -510,7 +533,11 @@ func saveConfig(path string, cfg AppConfig) error {
 	if err != nil {
 		return err
 	}
-	return os.WriteFile(path, content, 0644)
+	tempPath := path + ".tmp"
+	if err := os.WriteFile(tempPath, content, 0644); err != nil {
+		return err
+	}
+	return os.Rename(tempPath, path)
 }
 
 func getConfig() AppConfig {
@@ -763,8 +790,9 @@ func handleCreateFolder(w http.ResponseWriter, r *http.Request) {
 		writeError(w, http.StatusBadRequest, "folder name is required")
 		return
 	}
-	if strings.Contains(folderName, "/") || strings.Contains(folderName, "\\") {
-		writeError(w, http.StatusBadRequest, "folder name is invalid")
+	folderName, err := sanitizeFileName(folderName)
+	if err != nil {
+		writeError(w, http.StatusBadRequest, err.Error())
 		return
 	}
 
@@ -784,8 +812,12 @@ func handleCreateFolder(w http.ResponseWriter, r *http.Request) {
 		writeError(w, http.StatusBadRequest, "invalid path")
 		return
 	}
+	if err := ensureSafePath(targetPath, true); err != nil {
+		writeError(w, http.StatusBadRequest, err.Error())
+		return
+	}
 
-	if err := os.MkdirAll(targetPath, 0755); err != nil {
+	if err := os.Mkdir(targetPath, 0755); err != nil {
 		writeError(w, http.StatusInternalServerError, "failed to create folder")
 		return
 	}
@@ -802,7 +834,8 @@ func handleUploadFile(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	if err := r.ParseMultipartForm(512 << 20); err != nil {
+	r.Body = http.MaxBytesReader(w, r.Body, maxUploadSizeBytes)
+	if err := r.ParseMultipartForm(32 << 20); err != nil {
 		writeError(w, http.StatusBadRequest, "failed to parse multipart form")
 		return
 	}
@@ -825,7 +858,11 @@ func handleUploadFile(w http.ResponseWriter, r *http.Request) {
 	}
 	defer src.Close()
 
-	fileName := filepath.Base(header.Filename)
+	fileName, err := sanitizeFileName(filepath.Base(header.Filename))
+	if err != nil {
+		writeError(w, http.StatusBadRequest, err.Error())
+		return
+	}
 	if fileName == "" || fileName == "." {
 		writeError(w, http.StatusBadRequest, "file name is invalid")
 		return
@@ -836,13 +873,18 @@ func handleUploadFile(w http.ResponseWriter, r *http.Request) {
 		writeError(w, http.StatusBadRequest, "invalid path")
 		return
 	}
+	if err := ensureSafePath(targetPath, true); err != nil {
+		writeError(w, http.StatusBadRequest, err.Error())
+		return
+	}
 
-	if _, err := os.Stat(targetPath); err == nil {
+	overwrite := strings.TrimSpace(r.FormValue("overwrite")) == "1"
+	if _, err := os.Stat(targetPath); err == nil && !overwrite {
 		writeError(w, http.StatusConflict, "file already exists")
 		return
 	}
 
-	dst, err := os.Create(targetPath)
+	dst, err := os.OpenFile(targetPath, os.O_CREATE|os.O_WRONLY|os.O_TRUNC, 0644)
 	if err != nil {
 		writeError(w, http.StatusInternalServerError, "failed to create file")
 		return
@@ -882,14 +924,19 @@ func handleRenameFile(w http.ResponseWriter, r *http.Request) {
 		writeError(w, http.StatusBadRequest, "name is required")
 		return
 	}
-	if strings.Contains(newName, "/") || strings.Contains(newName, "\\") {
-		writeError(w, http.StatusBadRequest, "name is invalid")
+	newName, err := sanitizeFileName(newName)
+	if err != nil {
+		writeError(w, http.StatusBadRequest, err.Error())
 		return
 	}
 
 	absPath, err := toAbsolutePath(req.Path)
 	if err != nil {
 		writeError(w, http.StatusBadRequest, "invalid path")
+		return
+	}
+	if err := ensureSafePath(absPath, false); err != nil {
+		writeError(w, http.StatusBadRequest, err.Error())
 		return
 	}
 	if _, err := os.Stat(absPath); err != nil {
@@ -904,6 +951,10 @@ func handleRenameFile(w http.ResponseWriter, r *http.Request) {
 	targetPath := filepath.Clean(filepath.Join(filepath.Dir(absPath), newName))
 	if !isPathWithinBase(targetPath) {
 		writeError(w, http.StatusBadRequest, "invalid path")
+		return
+	}
+	if err := ensureSafePath(targetPath, true); err != nil {
+		writeError(w, http.StatusBadRequest, err.Error())
 		return
 	}
 
@@ -950,9 +1001,34 @@ func listFiles(w http.ResponseWriter, r *http.Request) {
 	}
 
 	fileList := make([]FileInfo, 0, len(entries))
+	searchTerm := strings.ToLower(strings.TrimSpace(r.URL.Query().Get("search")))
+	sortBy := strings.TrimSpace(r.URL.Query().Get("sortBy"))
+	if sortBy == "" {
+		sortBy = "name"
+	}
+	order := strings.TrimSpace(r.URL.Query().Get("order"))
+	if order != "desc" {
+		order = "asc"
+	}
+	typeFilter := strings.TrimSpace(r.URL.Query().Get("type"))
+	includeHidden := r.URL.Query().Get("includeHidden") == "1"
+
 	for _, entry := range entries {
+		if entry.Type()&os.ModeSymlink != 0 {
+			continue
+		}
+		if !includeHidden && isHiddenName(entry.Name()) {
+			continue
+		}
 		info, err := entry.Info()
 		if err != nil {
+			continue
+		}
+		fileType := inferFileCategory(entry.Name(), entry.IsDir())
+		if searchTerm != "" && !strings.Contains(strings.ToLower(entry.Name()), searchTerm) {
+			continue
+		}
+		if typeFilter != "" && typeFilter != "all" && typeFilter != fileType {
 			continue
 		}
 		fullPath := filepath.Join(absPath, entry.Name())
@@ -964,6 +1040,30 @@ func listFiles(w http.ResponseWriter, r *http.Request) {
 			ModifiedTime: info.ModTime(),
 		})
 	}
+
+	sort.Slice(fileList, func(i, j int) bool {
+		left := fileList[i]
+		right := fileList[j]
+		if left.IsDirectory != right.IsDirectory {
+			if order == "desc" {
+				return !left.IsDirectory
+			}
+			return left.IsDirectory
+		}
+		var less bool
+		switch sortBy {
+		case "size":
+			less = left.Size < right.Size
+		case "modified":
+			less = left.ModifiedTime.Before(right.ModifiedTime)
+		default:
+			less = strings.ToLower(left.Name) < strings.ToLower(right.Name)
+		}
+		if order == "desc" {
+			return !less
+		}
+		return less
+	})
 
 	writeJSON(w, http.StatusOK, fileList)
 }
@@ -979,6 +1079,10 @@ func deleteFile(w http.ResponseWriter, r *http.Request) {
 	info, err := os.Stat(absPath)
 	if err != nil {
 		writeError(w, http.StatusNotFound, "file not found")
+		return
+	}
+	if err := ensureSafePath(absPath, false); err != nil {
+		writeError(w, http.StatusBadRequest, err.Error())
 		return
 	}
 
@@ -1040,13 +1144,26 @@ func handleEditVideo(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	outputPath, err := processVideo(context.Background(), req, "sync", nil)
+	ctx, cancel := context.WithTimeout(r.Context(), maxTaskRuntime)
+	defer cancel()
+	outputPath, err := processVideo(ctx, req, "sync", nil)
 	if err != nil {
 		writeError(w, http.StatusInternalServerError, err.Error())
 		return
 	}
 
 	writeJSON(w, http.StatusOK, map[string]any{"success": true, "output": outputPath})
+}
+
+func handleVideoOptions(w http.ResponseWriter, r *http.Request) {
+	if r.Method != http.MethodGet {
+		writeError(w, http.StatusMethodNotAllowed, "method not allowed")
+		return
+	}
+	writeJSON(w, http.StatusOK, map[string]any{
+		"success": true,
+		"codecs":  detectAvailableVideoCodecs(),
+	})
 }
 
 func handleCreateVideoTask(w http.ResponseWriter, r *http.Request) {
@@ -1068,9 +1185,13 @@ func handleCreateVideoTask(w http.ResponseWriter, r *http.Request) {
 		writeError(w, http.StatusBadRequest, "segments are required")
 		return
 	}
+	if _, err := resolveVideoCodecOption(req.ExportMode, req.VideoCodec); err != nil {
+		writeError(w, http.StatusBadRequest, err.Error())
+		return
+	}
 
 	task := taskManager.Create("video-edit", "video task created")
-	ctx, cancel := context.WithCancel(context.Background())
+	ctx, cancel := context.WithTimeout(context.Background(), maxTaskRuntime)
 	taskManager.SetCancel(task.ID, cancel)
 
 	go runVideoTask(ctx, task.ID, req)
@@ -1078,6 +1199,13 @@ func handleCreateVideoTask(w http.ResponseWriter, r *http.Request) {
 }
 
 func runVideoTask(ctx context.Context, taskID string, req VideoEditRequest) {
+	release, err := acquireTaskSlot(ctx)
+	if err != nil {
+		taskManager.Fail(taskID, err)
+		return
+	}
+	defer release()
+
 	updateProgress := func(stage string, progress int, message string) {
 		taskManager.Update(taskID, func(t *Task) {
 			t.Status = TaskStatusRunning
@@ -1106,6 +1234,9 @@ func processVideo(ctx context.Context, req VideoEditRequest, taskID string, prog
 	if err != nil {
 		return "", errors.New("invalid video path")
 	}
+	if err := ensureSafePath(absPath, false); err != nil {
+		return "", err
+	}
 	outputDir := getConfig().VideoOutputDir
 	if outputDir == "" {
 		outputDir = filepath.Join(getConfig().BaseDir, "output")
@@ -1116,6 +1247,11 @@ func processVideo(ctx context.Context, req VideoEditRequest, taskID string, prog
 
 	if len(req.Segments) == 0 {
 		return "", errors.New("segments are required")
+	}
+
+	codecOption, err := resolveVideoCodecOption(req.ExportMode, req.VideoCodec)
+	if err != nil {
+		return "", err
 	}
 
 	report := func(stage string, percent int, message string) {
@@ -1134,9 +1270,9 @@ func processVideo(ctx context.Context, req VideoEditRequest, taskID string, prog
 		}
 
 		baseName := strings.TrimSuffix(filepath.Base(absPath), filepath.Ext(absPath))
-		outputPath := filepath.Join(outputDir, fmt.Sprintf("%s_merge.mp4", baseName))
+		outputPath := filepath.Join(outputDir, fmt.Sprintf("%s_export.%s", baseName, codecOption.Container))
 		report("processing", 30, "processing segment")
-		if err := processSegment(ctx, absPath, outputPath, segment.StartTime, duration); err != nil {
+		if err := processSegment(ctx, absPath, outputPath, segment.StartTime, duration, codecOption); err != nil {
 			return "", err
 		}
 		report("finalizing", 90, "finalizing output")
@@ -1166,19 +1302,22 @@ func processVideo(ctx context.Context, req VideoEditRequest, taskID string, prog
 		}
 
 		outputPath := filepath.Join(tempDir, fmt.Sprintf("segment_%d.mp4", i))
+		if codecOption.Container == "mkv" {
+			outputPath = filepath.Join(tempDir, fmt.Sprintf("segment_%d.mkv", i))
+		}
 		progressBase := 10 + int((float64(i)/float64(len(req.Segments)))*60)
 		report("extracting", progressBase, fmt.Sprintf("extracting segment %d/%d", i+1, len(req.Segments)))
 
-		if err := processSegment(ctx, absPath, outputPath, segment.StartTime, duration); err != nil {
+		if err := processSegment(ctx, absPath, outputPath, segment.StartTime, duration, codecOption); err != nil {
 			return "", err
 		}
 		segmentFiles = append(segmentFiles, outputPath)
 	}
 
 	baseName := strings.TrimSuffix(filepath.Base(absPath), filepath.Ext(absPath))
-	outputPath := filepath.Join(outputDir, fmt.Sprintf("%s_merged.mp4", baseName))
+	outputPath := filepath.Join(outputDir, fmt.Sprintf("%s_merged.%s", baseName, codecOption.Container))
 	report("merging", 80, "merging segments")
-	if err := mergeSegments(ctx, segmentFiles, outputPath); err != nil {
+	if err := mergeSegments(ctx, segmentFiles, outputPath, codecOption); err != nil {
 		return "", err
 	}
 	report("finalizing", 95, "finalizing output")
@@ -1202,7 +1341,7 @@ func handleCreateBatchDeleteTask(w http.ResponseWriter, r *http.Request) {
 	}
 
 	task := taskManager.Create("batch-delete", fmt.Sprintf("deleting %d items", len(req.Paths)))
-	ctx, cancel := context.WithCancel(context.Background())
+	ctx, cancel := context.WithTimeout(context.Background(), maxTaskRuntime)
 	taskManager.SetCancel(task.ID, cancel)
 
 	go runBatchDeleteTask(ctx, task.ID, req.Paths)
@@ -1210,6 +1349,13 @@ func handleCreateBatchDeleteTask(w http.ResponseWriter, r *http.Request) {
 }
 
 func runBatchDeleteTask(ctx context.Context, taskID string, paths []string) {
+	release, err := acquireTaskSlot(ctx)
+	if err != nil {
+		taskManager.Fail(taskID, err)
+		return
+	}
+	defer release()
+
 	total := len(paths)
 	taskManager.Update(taskID, func(t *Task) {
 		t.Status = TaskStatusRunning
@@ -1231,6 +1377,10 @@ func runBatchDeleteTask(ctx context.Context, taskID string, paths []string) {
 
 		absPath, err := toAbsolutePath(path)
 		if err != nil {
+			taskManager.Fail(taskID, err)
+			return
+		}
+		if err := ensureSafePath(absPath, false); err != nil {
 			taskManager.Fail(taskID, err)
 			return
 		}
@@ -1280,7 +1430,7 @@ func handleCreateBatchMoveTask(w http.ResponseWriter, r *http.Request) {
 	}
 
 	task := taskManager.Create("batch-move", fmt.Sprintf("moving %d items", len(req.Paths)))
-	ctx, cancel := context.WithCancel(context.Background())
+	ctx, cancel := context.WithTimeout(context.Background(), maxTaskRuntime)
 	taskManager.SetCancel(task.ID, cancel)
 
 	go runBatchMoveTask(ctx, task.ID, req.Paths, destination)
@@ -1288,6 +1438,13 @@ func handleCreateBatchMoveTask(w http.ResponseWriter, r *http.Request) {
 }
 
 func runBatchMoveTask(ctx context.Context, taskID string, paths []string, destination string) {
+	release, err := acquireTaskSlot(ctx)
+	if err != nil {
+		taskManager.Fail(taskID, err)
+		return
+	}
+	defer release()
+
 	total := len(paths)
 	taskManager.Update(taskID, func(t *Task) {
 		t.Status = TaskStatusRunning
@@ -1312,8 +1469,16 @@ func runBatchMoveTask(ctx context.Context, taskID string, paths []string, destin
 			taskManager.Fail(taskID, err)
 			return
 		}
+		if err := ensureSafePath(absPath, false); err != nil {
+			taskManager.Fail(taskID, err)
+			return
+		}
 
 		targetPath := filepath.Join(destination, filepath.Base(absPath))
+		if err := ensureSafePath(targetPath, true); err != nil {
+			taskManager.Fail(taskID, err)
+			return
+		}
 		if err := movePath(absPath, targetPath); err != nil {
 			taskManager.Fail(taskID, err)
 			return
@@ -1330,6 +1495,108 @@ func runBatchMoveTask(ctx context.Context, taskID string, paths []string, destin
 	}
 
 	taskManager.Complete(taskID, "batch move completed", toRelativePath(destination))
+}
+
+func handleCreateBatchCopyTask(w http.ResponseWriter, r *http.Request) {
+	if r.Method != http.MethodPost {
+		writeError(w, http.StatusMethodNotAllowed, "method not allowed")
+		return
+	}
+
+	var req BatchCopyRequest
+	if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
+		writeError(w, http.StatusBadRequest, "invalid request payload")
+		return
+	}
+	if len(req.Paths) == 0 {
+		writeError(w, http.StatusBadRequest, "paths are required")
+		return
+	}
+	if strings.TrimSpace(req.Destination) == "" {
+		writeError(w, http.StatusBadRequest, "destination is required")
+		return
+	}
+
+	destination, err := toAbsolutePath(req.Destination)
+	if err != nil {
+		writeError(w, http.StatusBadRequest, "invalid destination path")
+		return
+	}
+	if err := ensureSafePath(destination, false); err != nil {
+		writeError(w, http.StatusBadRequest, err.Error())
+		return
+	}
+
+	task := taskManager.Create("batch-copy", fmt.Sprintf("copying %d items", len(req.Paths)))
+	ctx, cancel := context.WithTimeout(context.Background(), maxTaskRuntime)
+	taskManager.SetCancel(task.ID, cancel)
+
+	go runBatchCopyTask(ctx, task.ID, req.Paths, destination)
+	writeJSON(w, http.StatusAccepted, map[string]any{"success": true, "taskId": task.ID})
+}
+
+func runBatchCopyTask(ctx context.Context, taskID string, paths []string, destination string) {
+	release, err := acquireTaskSlot(ctx)
+	if err != nil {
+		taskManager.Fail(taskID, err)
+		return
+	}
+	defer release()
+
+	total := len(paths)
+	taskManager.Update(taskID, func(t *Task) {
+		t.Status = TaskStatusRunning
+		t.Stage = "copying"
+		t.Progress = 5
+		t.Message = "starting batch copy"
+		t.Total = total
+		t.Current = 0
+		t.CurrentItem = ""
+	})
+
+	for i, rawPath := range paths {
+		select {
+		case <-ctx.Done():
+			taskManager.MarkCanceled(taskID)
+			return
+		default:
+		}
+
+		absPath, err := toAbsolutePath(rawPath)
+		if err != nil {
+			taskManager.Fail(taskID, err)
+			return
+		}
+		if err := ensureSafePath(absPath, false); err != nil {
+			taskManager.Fail(taskID, err)
+			return
+		}
+
+		targetPath := filepath.Join(destination, filepath.Base(absPath))
+		if err := ensureSafePath(targetPath, true); err != nil {
+			taskManager.Fail(taskID, err)
+			return
+		}
+		if _, err := os.Stat(targetPath); err == nil {
+			taskManager.Fail(taskID, fmt.Errorf("target already exists: %s", filepath.Base(targetPath)))
+			return
+		}
+		if err := copyPath(absPath, targetPath); err != nil {
+			taskManager.Fail(taskID, err)
+			return
+		}
+
+		progress := 10 + int((float64(i+1)/float64(total))*90)
+		currentItem := filepath.Base(absPath)
+		taskManager.Update(taskID, func(t *Task) {
+			t.Progress = progress
+			t.Message = fmt.Sprintf("copied %d/%d", i+1, total)
+			t.Current = i + 1
+			t.CurrentItem = currentItem
+		})
+	}
+
+	taskManager.Complete(taskID, "batch copy completed", toRelativePath(destination))
 }
 
 func handleTaskList(w http.ResponseWriter, r *http.Request) {
@@ -1410,8 +1677,11 @@ func getTimeDifference(start, end string) (string, error) {
 	return strconv.Itoa(endTotalSeconds - startTotalSeconds), nil
 }
 
-func processSegment(ctx context.Context, inputPath string, outputPath string, startTime string, duration string) error {
-	cmd := exec.CommandContext(ctx, "ffmpeg", "-y", "-i", inputPath, "-ss", startTime, "-t", duration, "-c", "copy", outputPath)
+func processSegment(ctx context.Context, inputPath string, outputPath string, startTime string, duration string, codecOption VideoCodecOption) error {
+	args := []string{"-y", "-i", inputPath, "-ss", startTime, "-t", duration}
+	args = append(args, buildCodecArgs(codecOption)...)
+	args = append(args, outputPath)
+	cmd := exec.CommandContext(ctx, "ffmpeg", args...)
 	output, err := cmd.CombinedOutput()
 	if err != nil {
 		if errors.Is(ctx.Err(), context.Canceled) {
@@ -1425,7 +1695,7 @@ func processSegment(ctx context.Context, inputPath string, outputPath string, st
 	return nil
 }
 
-func mergeSegments(ctx context.Context, segmentFiles []string, outputPath string) error {
+func mergeSegments(ctx context.Context, segmentFiles []string, outputPath string, codecOption VideoCodecOption) error {
 	if len(segmentFiles) == 0 {
 		return errors.New("no segment files to merge")
 	}
@@ -1440,7 +1710,10 @@ func mergeSegments(ctx context.Context, segmentFiles []string, outputPath string
 		return err
 	}
 
-	cmd := exec.CommandContext(ctx, "ffmpeg", "-y", "-f", "concat", "-safe", "0", "-i", concatFile, "-c", "copy", outputPath)
+	args := []string{"-y", "-f", "concat", "-safe", "0", "-i", concatFile}
+	args = append(args, buildMergeCodecArgs(codecOption)...)
+	args = append(args, outputPath)
+	cmd := exec.CommandContext(ctx, "ffmpeg", args...)
 	output, err := cmd.CombinedOutput()
 	if err != nil {
 		if errors.Is(ctx.Err(), context.Canceled) {
@@ -1483,23 +1756,33 @@ func toAbsolutePath(inputPath string) (string, error) {
 		return baseDir, nil
 	}
 
-	cleaned := filepath.Clean(filepath.FromSlash(inputPath))
-	var absPath string
-	if filepath.IsAbs(cleaned) {
-		absPath = cleaned
-	} else {
-		absPath = filepath.Join(baseDir, cleaned)
-	}
-
-	absPath = filepath.Clean(absPath)
-	rel, err := filepath.Rel(baseDir, absPath)
+	cleaned, err := cleanRelativeInput(inputPath)
 	if err != nil {
 		return "", errors.New("invalid path")
 	}
-	if rel == ".." || strings.HasPrefix(rel, ".."+string(filepath.Separator)) {
+	absPath := filepath.Clean(filepath.Join(baseDir, filepath.FromSlash(cleaned)))
+	if !isPathWithinBase(absPath) {
 		return "", errors.New("invalid path")
 	}
+	if err := ensureSafePath(absPath, true); err != nil {
+		return "", err
+	}
 	return absPath, nil
+}
+
+func cleanRelativeInput(raw string) (string, error) {
+	trimmed := strings.TrimSpace(strings.ReplaceAll(raw, "\\", "/"))
+	if strings.Contains(trimmed, "\x00") {
+		return "", errors.New("invalid path")
+	}
+	if trimmed == "" || trimmed == "/" {
+		return "", nil
+	}
+	cleaned := path.Clean("/" + strings.TrimPrefix(trimmed, "/"))
+	if cleaned == "/" {
+		return "", nil
+	}
+	return strings.TrimPrefix(cleaned, "/"), nil
 }
 
 func normalizePath(path string) (string, error) {
@@ -1529,7 +1812,11 @@ func normalizeAndValidateDir(path string) (string, error) {
 	if !stat.IsDir() {
 		return "", errors.New("baseDir must be a directory")
 	}
-	return normalized, nil
+	realPath, err := filepath.EvalSymlinks(normalized)
+	if err != nil {
+		return normalized, nil
+	}
+	return realPath, nil
 }
 
 func normalizeOutputDir(baseDir string, outputDir string) (string, error) {
@@ -1565,8 +1852,87 @@ func isPathWithinBase(path string) bool {
 	return true
 }
 
+func ensureSafePath(targetPath string, allowMissing bool) error {
+	baseDir := getConfig().BaseDir
+	rel, err := filepath.Rel(baseDir, filepath.Clean(targetPath))
+	if err != nil {
+		return errors.New("invalid path")
+	}
+	if rel == ".." || strings.HasPrefix(rel, ".."+string(filepath.Separator)) {
+		return errors.New("invalid path")
+	}
+	if rel == "." {
+		return nil
+	}
+	current := baseDir
+	for _, segment := range strings.Split(rel, string(filepath.Separator)) {
+		current = filepath.Join(current, segment)
+		info, err := os.Lstat(current)
+		if err != nil {
+			if os.IsNotExist(err) && allowMissing {
+				return nil
+			}
+			if os.IsNotExist(err) {
+				return errors.New("path does not exist")
+			}
+			return err
+		}
+		if info.Mode()&os.ModeSymlink != 0 {
+			return errors.New("symlink paths are not allowed")
+		}
+	}
+	return nil
+}
+
+func sanitizeFileName(raw string) (string, error) {
+	name := strings.TrimSpace(raw)
+	if name == "" || name == "." || name == ".." {
+		return "", errors.New("file name is invalid")
+	}
+	if strings.Contains(name, "/") || strings.Contains(name, "\\") || strings.ContainsRune(name, '\x00') {
+		return "", errors.New("file name is invalid")
+	}
+	reserved := map[string]struct{}{
+		"CON": {}, "PRN": {}, "AUX": {}, "NUL": {},
+		"COM1": {}, "COM2": {}, "COM3": {}, "COM4": {}, "COM5": {}, "COM6": {}, "COM7": {}, "COM8": {}, "COM9": {},
+		"LPT1": {}, "LPT2": {}, "LPT3": {}, "LPT4": {}, "LPT5": {}, "LPT6": {}, "LPT7": {}, "LPT8": {}, "LPT9": {},
+	}
+	baseName := strings.TrimSuffix(name, filepath.Ext(name))
+	if _, exists := reserved[strings.ToUpper(baseName)]; exists {
+		return "", errors.New("file name is reserved on Windows")
+	}
+	return name, nil
+}
+
+func inferFileCategory(name string, isDir bool) string {
+	if isDir {
+		return "folder"
+	}
+	lowerName := strings.ToLower(name)
+	switch {
+	case strings.HasSuffix(lowerName, ".mp4") || strings.HasSuffix(lowerName, ".mov") || strings.HasSuffix(lowerName, ".mkv") || strings.HasSuffix(lowerName, ".avi") || strings.HasSuffix(lowerName, ".webm") || strings.HasSuffix(lowerName, ".m4v"):
+		return "video"
+	case strings.HasSuffix(lowerName, ".png") || strings.HasSuffix(lowerName, ".jpg") || strings.HasSuffix(lowerName, ".jpeg") || strings.HasSuffix(lowerName, ".gif") || strings.HasSuffix(lowerName, ".bmp") || strings.HasSuffix(lowerName, ".webp") || strings.HasSuffix(lowerName, ".svg"):
+		return "image"
+	case strings.HasSuffix(lowerName, ".mp3") || strings.HasSuffix(lowerName, ".wav") || strings.HasSuffix(lowerName, ".flac") || strings.HasSuffix(lowerName, ".aac") || strings.HasSuffix(lowerName, ".ogg"):
+		return "audio"
+	case strings.HasSuffix(lowerName, ".zip") || strings.HasSuffix(lowerName, ".rar") || strings.HasSuffix(lowerName, ".7z") || strings.HasSuffix(lowerName, ".tar") || strings.HasSuffix(lowerName, ".gz"):
+		return "archive"
+	case strings.HasSuffix(lowerName, ".pdf") || strings.HasSuffix(lowerName, ".doc") || strings.HasSuffix(lowerName, ".docx") || strings.HasSuffix(lowerName, ".txt") || strings.HasSuffix(lowerName, ".md"):
+		return "document"
+	case strings.HasSuffix(lowerName, ".go") || strings.HasSuffix(lowerName, ".ts") || strings.HasSuffix(lowerName, ".tsx") || strings.HasSuffix(lowerName, ".js") || strings.HasSuffix(lowerName, ".jsx") || strings.HasSuffix(lowerName, ".vue") || strings.HasSuffix(lowerName, ".json") || strings.HasSuffix(lowerName, ".yaml") || strings.HasSuffix(lowerName, ".yml"):
+		return "code"
+	default:
+		return "other"
+	}
+}
+
+func isHiddenName(name string) bool {
+	return strings.HasPrefix(name, ".")
+}
+
 func createSessionToken() string {
-	raw := make([]byte, 24)
+	raw := make([]byte, 32)
 	_, _ = rand.Read(raw)
 	token := hex.EncodeToString(raw)
 
@@ -1683,9 +2049,12 @@ func movePath(src string, dst string) error {
 }
 
 func copyPath(src string, dst string) error {
-	info, err := os.Stat(src)
+	info, err := os.Lstat(src)
 	if err != nil {
 		return err
+	}
+	if info.Mode()&os.ModeSymlink != 0 {
+		return errors.New("symlink copy is not allowed")
 	}
 
 	if info.IsDir() {
@@ -1722,4 +2091,105 @@ func copyPath(src string, dst string) error {
 		return err
 	}
 	return os.Chmod(dst, info.Mode())
+}
+
+func acquireTaskSlot(ctx context.Context) (func(), error) {
+	select {
+	case taskSlots <- struct{}{}:
+		return func() {
+			<-taskSlots
+		}, nil
+	case <-ctx.Done():
+		return nil, context.Canceled
+	}
+}
+
+func detectAvailableVideoCodecs() []VideoCodecOption {
+	encoders := readFFmpegEncoders()
+	options := []VideoCodecOption{
+		{ID: "copy", Label: "Direct Stream Copy", Description: "Fastest, keeps original codec when possible", Container: "mp4", Mode: "copy", Available: true},
+		{ID: "h264", Label: "H.264", Description: "Balanced compatibility and speed", Container: "mp4", Mode: "transcode", Available: false},
+		{ID: "h265", Label: "H.265 / HEVC", Description: "Smaller output, slower encode", Container: "mp4", Mode: "transcode", Available: false},
+		{ID: "av1", Label: "AV1", Description: "Best compression, slowest encode", Container: "mkv", Mode: "transcode", Available: false},
+	}
+	if encoders == "" {
+		return options
+	}
+	for i := range options {
+		switch options[i].ID {
+		case "h264":
+			options[i].Available = strings.Contains(encoders, "libx264")
+		case "h265":
+			options[i].Available = strings.Contains(encoders, "libx265")
+		case "av1":
+			options[i].Available = strings.Contains(encoders, "libsvtav1") || strings.Contains(encoders, "librav1e") || strings.Contains(encoders, "libaom-av1")
+		}
+	}
+	return options
+}
+
+func readFFmpegEncoders() string {
+	output, err := exec.Command("ffmpeg", "-hide_banner", "-encoders").CombinedOutput()
+	if err != nil {
+		return ""
+	}
+	return string(output)
+}
+
+func resolveVideoCodecOption(exportMode string, codec string) (VideoCodecOption, error) {
+	mode := strings.TrimSpace(exportMode)
+	if mode == "" {
+		mode = "copy"
+	}
+	selected := strings.TrimSpace(codec)
+	if selected == "" {
+		if mode == "transcode" {
+			selected = "h264"
+		} else {
+			selected = "copy"
+		}
+	}
+	for _, option := range detectAvailableVideoCodecs() {
+		if option.ID != selected {
+			continue
+		}
+		if option.Mode != mode {
+			return VideoCodecOption{}, errors.New("video codec does not match export mode")
+		}
+		if !option.Available {
+			return VideoCodecOption{}, fmt.Errorf("selected codec is not available: %s", option.Label)
+		}
+		return option, nil
+	}
+	return VideoCodecOption{}, errors.New("unsupported video codec")
+}
+
+func buildCodecArgs(option VideoCodecOption) []string {
+	switch option.ID {
+	case "h264":
+		return []string{"-c:v", "libx264", "-preset", "medium", "-crf", "23", "-c:a", "aac", "-b:a", "192k"}
+	case "h265":
+		return []string{"-c:v", "libx265", "-preset", "medium", "-crf", "28", "-c:a", "aac", "-b:a", "192k"}
+	case "av1":
+		codec := "libsvtav1"
+		encoders := readFFmpegEncoders()
+		switch {
+		case strings.Contains(encoders, "libsvtav1"):
+			codec = "libsvtav1"
+		case strings.Contains(encoders, "librav1e"):
+			codec = "librav1e"
+		case strings.Contains(encoders, "libaom-av1"):
+			codec = "libaom-av1"
+		}
+		return []string{"-c:v", codec, "-preset", "6", "-crf", "32", "-c:a", "libopus", "-b:a", "128k"}
+	default:
+		return []string{"-c", "copy"}
+	}
+}
+
+func buildMergeCodecArgs(option VideoCodecOption) []string {
+	if option.Mode == "copy" {
+		return []string{"-c", "copy"}
+	}
+	return buildCodecArgs(option)
 }

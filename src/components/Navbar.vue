@@ -1,27 +1,13 @@
 <script setup lang="ts">
 import { useRouter } from 'vue-router';
-import { useTheme } from 'vuetify';
-import { ref, watch, onMounted } from 'vue';
+import { onMounted } from 'vue';
 import { authState, checkAuthStatus, logout } from '../composables/useAuth';
 import { useLocale } from '../composables/useLocale';
+import { useThemePreference } from '../composables/useThemePreference';
 
 const router = useRouter();
-const theme = useTheme();
 const { t } = useLocale();
-
-const savedTheme = localStorage.getItem('theme') || 'light';
-const isDark = ref(savedTheme === 'dark');
-
-onMounted(() => {
-  theme.global.name.value = isDark.value ? 'dark' : 'light';
-  document.body.classList.toggle('theme-dark', isDark.value);
-});
-
-watch(isDark, (newValue) => {
-  theme.global.name.value = newValue ? 'dark' : 'light';
-  localStorage.setItem('theme', newValue ? 'dark' : 'light');
-  document.body.classList.toggle('theme-dark', newValue);
-});
+const { isDark, toggleTheme } = useThemePreference();
 
 const navigateHome = () => {
   router.push('/');
@@ -51,11 +37,11 @@ onMounted(async () => {
 </script>
 
 <template>
-  <v-app-bar class="glass-appbar" elevation="0">
+  <v-app-bar class="glass-appbar navbar-shell" elevation="0">
 
     <v-app-bar-title>
-      <v-btn variant="text" @click="navigateHome" class="text-h6">
-        <v-icon start icon="mdi-list-box" color="secondary"></v-icon>
+      <v-btn variant="text" @click="navigateHome" class="navbar-brand pill-button">
+        <v-icon start icon="mdi-folder-multiple-image" color="secondary"></v-icon>
         {{ t('appTitle') }}
       </v-btn>
     </v-app-bar-title>
@@ -78,12 +64,17 @@ onMounted(async () => {
         @click="navigateSettings"
       />
       <v-btn
-        :icon="isDark ? 'mdi-weather-night' : 'mdi-weather-sunny'"
-        @click="isDark = !isDark"
-      ></v-btn>
+        variant="tonal"
+        class="pill-button"
+        :prepend-icon="isDark ? 'mdi-weather-night' : 'mdi-white-balance-sunny'"
+        @click="toggleTheme"
+      >
+        {{ isDark ? t('darkModeOn') : t('lightModeOn') }}
+      </v-btn>
       <v-btn
         v-if="authState.authEnabled.value && !authState.authenticated.value"
         variant="tonal"
+        class="pill-button"
         color="primary"
         @click="navigateLogin"
       >
@@ -92,6 +83,7 @@ onMounted(async () => {
       <v-btn
         v-if="authState.authEnabled.value && authState.authenticated.value"
         variant="tonal"
+        class="pill-button"
         color="error"
         :icon="'mdi-logout'"
         @click="doLogout"
@@ -100,3 +92,15 @@ onMounted(async () => {
     </template>
   </v-app-bar>
 </template>
+
+<style scoped>
+.navbar-shell {
+  padding-inline: 10px;
+}
+
+.navbar-brand {
+  font-size: 1rem;
+  font-weight: 800;
+  letter-spacing: -0.03em;
+}
+</style>

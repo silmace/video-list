@@ -1,17 +1,6 @@
 import { computed, ref } from 'vue';
-import { api, setAuthToken, getAuthToken } from '../services/api';
-
-interface AuthStatusResponse {
-  authEnabled: boolean;
-  authenticated: boolean;
-  taskPollIntervalMs: number;
-}
-
-interface LoginResponse {
-  success: boolean;
-  token?: string;
-  passwordNeeded?: boolean;
-}
+import { getAuthToken, setAuthToken } from '../services/api';
+import { fetchAuthStatus, loginWithPassword, performLogout, type AuthStatusResponse } from '../services/auth';
 
 const authEnabled = ref(false);
 const authenticated = ref(false);
@@ -23,35 +12,28 @@ const hasToken = computed(() => !!getAuthToken());
 export async function checkAuthStatus(): Promise<AuthStatusResponse> {
   authLoading.value = true;
   try {
-    const response = await api.get<AuthStatusResponse>('/api/auth/status');
-    authEnabled.value = response.data.authEnabled;
-    authenticated.value = response.data.authenticated;
-    taskPollIntervalMs.value = response.data.taskPollIntervalMs || 1500;
+    const response = await fetchAuthStatus();
+    authEnabled.value = response.authEnabled;
+    authenticated.value = response.authenticated;
+    taskPollIntervalMs.value = response.taskPollIntervalMs || 1500;
 
     if (authEnabled.value && !authenticated.value && hasToken.value) {
       setAuthToken('');
     }
 
-    return response.data;
+    return response;
   } finally {
     authLoading.value = false;
   }
 }
 
 export async function login(password: string): Promise<void> {
-  const response = await api.post<LoginResponse>('/api/auth/login', { password });
-  const token = response.data.token || '';
-  setAuthToken(token);
+  await loginWithPassword(password);
   await checkAuthStatus();
 }
 
 export async function logout(): Promise<void> {
-  try {
-    await api.post('/api/auth/logout');
-  } catch {
-    // ignore network errors on logout and always clear local session token
-  }
-  setAuthToken('');
+  await performLogout();
   authenticated.value = false;
 }
 

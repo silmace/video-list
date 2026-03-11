@@ -1,10 +1,10 @@
 <script setup lang="ts">
 import { computed, onMounted, onUnmounted, ref } from 'vue';
 import { useRouter } from 'vue-router';
-import { api } from '../services/api';
 import { authState } from '../composables/useAuth';
 import type { TaskItem } from '../types';
 import { useLocale } from '../composables/useLocale';
+import { cancelTask as cancelTaskRequest, fetchTasks as loadTasks } from '../services/tasks';
 
 const router = useRouter();
 const tasks = ref<TaskItem[]>([]);
@@ -68,6 +68,19 @@ const taskDetailText = (task: TaskItem) => {
     }
   }
 
+  if (task.type === 'batch-copy') {
+    if (task.status === 'success') {
+      return t('taskCopyDone', { count: task.total || 0 });
+    }
+    if (task.status === 'running') {
+      return t('taskCopyProgress', {
+        current: task.current || 0,
+        total: task.total || 0,
+        item: task.currentItem || '-',
+      });
+    }
+  }
+
   if (task.type === 'video-edit' && task.status === 'running') {
     return t('taskVideoProgress', {
       progress: task.progress,
@@ -89,8 +102,7 @@ const showSnackbar = (message: string, color: string) => {
 const fetchTasks = async () => {
   loading.value = true;
   try {
-    const response = await api.get<{ success: boolean; tasks: TaskItem[] }>('/api/tasks');
-    tasks.value = response.data.tasks;
+    tasks.value = await loadTasks();
   } catch {
     showSnackbar(t('tasksLoadError'), 'error');
   } finally {
@@ -100,7 +112,7 @@ const fetchTasks = async () => {
 
 const cancelTask = async (taskId: string) => {
   try {
-    await api.delete(`/api/tasks/${taskId}`);
+    await cancelTaskRequest(taskId);
     showSnackbar(t('taskCanceled'), 'success');
     await fetchTasks();
   } catch {
@@ -131,7 +143,7 @@ onUnmounted(() => {
 </script>
 
 <template>
-  <v-container class="pa-4">
+  <v-container class="app-page">
     <v-card class="glass-panel pa-4 mb-4">
       <div class="d-flex align-center">
         <div>

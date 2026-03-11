@@ -1,10 +1,11 @@
 import { createRouter, createWebHistory } from 'vue-router'
-import FileList from '../components/FileList.vue'
-import VideoEditor from '../components/VideoEditor.vue'
-import LoginView from '../views/LoginView.vue'
-import SettingsView from '../views/SettingsView.vue'
-import TasksView from '../views/TasksView.vue'
 import { authState, checkAuthStatus } from '../composables/useAuth'
+
+const FileList = () => import('../components/FileList.vue')
+const VideoEditor = () => import('../components/VideoEditor.vue')
+const LoginView = () => import('../views/LoginView.vue')
+const SettingsView = () => import('../views/SettingsView.vue')
+const TasksView = () => import('../views/TasksView.vue')
 
 const router = createRouter({
   history: createWebHistory(),

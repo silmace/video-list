@@ -1,8 +1,9 @@
 <script setup lang="ts">
-import { ref, onMounted, onUnmounted } from 'vue';
+import { computed, onMounted, onUnmounted, ref } from 'vue';
 import { useRoute, useRouter } from 'vue-router';
-import type { VideoSegment } from '../types';
-import { api, buildMediaUrl } from '../services/api';
+import type { VideoCodecOption, VideoExportMode, VideoSegment } from '../types';
+import { buildMediaUrl } from '../services/api';
+import { createVideoTask as createVideoTaskRequest, fetchVideoOptions } from '../services/video';
 import Artplayer from 'artplayer';
 import PathBreadcrumb from './PathBreadcrumb.vue';
 import { useLocale } from '../composables/useLocale';
@@ -11,12 +12,24 @@ const route = useRoute();
 const router = useRouter();
 const videoPath = ref('');
 const segments = ref<VideoSegment[]>([{ startTime: '00:00:00', endTime: '00:00:00' }]);
+const exportMode = ref<VideoExportMode>('copy');
+const selectedCodec = ref('copy');
+const codecOptions = ref<VideoCodecOption[]>([]);
 const artRef = ref<HTMLDivElement | null>(null);
 const loading = ref(false);
 const snackbar = ref({ show: false, message: '', color: '' });
 const latestTaskId = ref('');
+const currentPlaybackTime = ref('00:00:00');
 let art: Artplayer | null = null;
 const { t } = useLocale();
+
+const availableCodecOptions = computed(() => codecOptions.value.filter((item) => item.mode === exportMode.value));
+const segmentErrors = computed(() => segments.value.map((segment) => validateSegment(segment)));
+const hasInvalidSegments = computed(() => segmentErrors.value.some(Boolean));
+const hasValidCodecSelection = computed(() => availableCodecOptions.value.some((item) => item.id === selectedCodec.value));
+const totalClipDuration = computed(() => {
+  return segments.value.reduce((sum, segment) => sum + Math.max(0, parseTime(segment.endTime) - parseTime(segment.startTime)), 0);
+});
 
 const getVideoPath = () => {
   if (!route.params.pathMatch) return '';
@@ -65,7 +78,10 @@ onMounted(() => {
       autoSize: true,
       autoMini: true,
       autoOrientation: true,
-      theme: '#1a73e8',
+      theme: '#0f766e',
+    });
+    art.on('video:timeupdate', () => {
+      currentPlaybackTime.value = formatTime(art?.currentTime || 0);
     });
   }
 });
@@ -81,6 +97,22 @@ const addSegment = () => {
   segments.value.push({ startTime: '00:00:00', endTime: '00:00:00' });
 };
 
+const duplicateSegment = (index: number) => {
+  const item = segments.value[index];
+  segments.value.splice(index + 1, 0, { ...item });
+};
+
+const moveSegment = (index: number, step: number) => {
+  const targetIndex = index + step;
+  if (targetIndex < 0 || targetIndex >= segments.value.length) {
+    return;
+  }
+  const draft = [...segments.value];
+  const [item] = draft.splice(index, 1);
+  draft.splice(targetIndex, 0, item);
+  segments.value = draft;
+};
+
 const removeSegment = (index: number) => {
   if (segments.value.length === 1) return;
   segments.value.splice(index, 1);
@@ -93,6 +125,33 @@ const formatTime = (time: number): string => {
   return `${hours.toString().padStart(2, '0')}:${minutes.toString().padStart(2, '0')}:${seconds.toString().padStart(2, '0')}`;
 };
 
+const parseTime = (value: string): number => {
+  const match = value.match(/^(\d{2}):(\d{2}):(\d{2})$/);
+  if (!match) {
+    return -1;
+  }
+  const hours = Number(match[1]);
+  const minutes = Number(match[2]);
+  const seconds = Number(match[3]);
+  return hours * 3600 + minutes * 60 + seconds;
+};
+
+const validateSegment = (segment: VideoSegment): string => {
+  const start = parseTime(segment.startTime);
+  const end = parseTime(segment.endTime);
+  if (start < 0 || end < 0) {
+    return t('invalidTimeFormat');
+  }
+  if (end <= start) {
+    return t('invalidSegmentRange');
+  }
+  return '';
+};
+
+const formatDuration = (seconds: number) => {
+  return formatTime(seconds);
+};
+
 const setCurrentTime = (index: number, type: 'start' | 'end') => {
   if (!art) return;
   const currentTime = art.currentTime;
@@ -100,13 +159,23 @@ const setCurrentTime = (index: number, type: 'start' | 'end') => {
 };
 
 const createVideoTask = async () => {
+  if (hasInvalidSegments.value) {
+    showSnackbar(t('invalidSegmentRange'), 'warning');
+    return;
+  }
+  if (!hasValidCodecSelection.value) {
+    showSnackbar(t('noCodecAvailable'), 'warning');
+    return;
+  }
   loading.value = true;
   try {
-    const response = await api.post<{ success: boolean; taskId: string }>('/api/tasks/video', {
+    const response = await createVideoTaskRequest({
       videoPath: videoPath.value,
       segments: segments.value,
+      exportMode: exportMode.value,
+      videoCodec: selectedCodec.value,
     });
-    latestTaskId.value = response.data.taskId;
+    latestTaskId.value = response.taskId;
     showSnackbar(t('videoTaskCreated'), 'success');
   } catch (error) {
     showSnackbar(resolveApiErrorMessage(error, t('videoTaskCreateError')), 'error');
@@ -118,21 +187,34 @@ const createVideoTask = async () => {
 const getFileName = () => videoPath.value?.split('/').pop() || t('videoEditorFallback');
 
 const handlePathNavigation = (path: string) => {
-  if (path === '/') {
-    router.push('/');
-    return;
-  }
-  const parentDir = videoPath.value.split('/').slice(0, -1).join('/');
-  router.push(parentDir || '/');
+  router.push(path);
 };
 
 const openTaskCenter = () => {
   router.push('/tasks');
 };
+
+const selectExportMode = (mode: VideoExportMode) => {
+  exportMode.value = mode;
+  const preferred = availableCodecOptions.value[0];
+  selectedCodec.value = preferred?.id || '';
+};
+
+onMounted(async () => {
+  try {
+    codecOptions.value = await fetchVideoOptions();
+    const preferred = codecOptions.value.find((item) => item.id === 'copy' && item.available);
+    if (preferred) {
+      selectedCodec.value = preferred.id;
+    }
+  } catch {
+    codecOptions.value = [];
+  }
+});
 </script>
 
 <template>
-  <v-container class="pa-4">
+  <v-container class="app-page">
     <v-card class="glass-panel mb-4">
       <v-card-text>
         <PathBreadcrumb :path="videoPath" :onNavigate="handlePathNavigation" />
@@ -140,19 +222,55 @@ const openTaskCenter = () => {
     </v-card>
 
     <v-card class="glass-panel">
-      <v-card-title class="text-h5 px-4 pt-4">
-        {{ getFileName() }}
+      <v-card-title class="text-h5 px-4 pt-4 d-flex flex-wrap align-center ga-3">
+        <span>{{ getFileName() }}</span>
+        <v-chip size="small" color="secondary" variant="tonal">{{ t('currentPlaybackTime') }} {{ currentPlaybackTime }}</v-chip>
+        <v-chip size="small" color="primary" variant="tonal">{{ t('totalClipDuration') }} {{ formatDuration(totalClipDuration) }}</v-chip>
       </v-card-title>
 
       <v-card-text>
         <div ref="artRef" class="video-player mb-6" />
 
+        <div class="export-panel mb-6">
+          <div class="text-subtitle-1 mb-2">{{ t('exportModeTitle') }}</div>
+          <div class="d-flex flex-wrap ga-2 mb-4">
+            <v-btn :variant="exportMode === 'copy' ? 'flat' : 'tonal'" class="pill-button" @click="selectExportMode('copy')">
+              {{ t('exportMode_copy') }}
+            </v-btn>
+            <v-btn :variant="exportMode === 'transcode' ? 'flat' : 'tonal'" class="pill-button" @click="selectExportMode('transcode')">
+              {{ t('exportMode_transcode') }}
+            </v-btn>
+          </div>
+
+          <div class="text-subtitle-1 mb-2">{{ t('videoCodecTitle') }}</div>
+          <div class="d-flex flex-wrap ga-2">
+            <v-chip
+              v-for="codec in availableCodecOptions"
+              :key="codec.id"
+              :color="codec.id === selectedCodec ? 'primary' : 'default'"
+              :variant="codec.id === selectedCodec ? 'flat' : 'outlined'"
+              @click="selectedCodec = codec.id"
+            >
+              {{ codec.label }}
+            </v-chip>
+          </div>
+        </div>
+
         <div v-for="(segment, index) in segments" :key="index" class="mb-2">
           <v-card variant="tonal">
             <v-card-title>
               <v-row align="center" justify="space-between" style="width: 100%">
-                <v-col cols="auto">{{ t('segment') }} {{ index + 1 }}</v-col>
+                <v-col cols="auto">{{ t('segment') }} {{ index + 1 }} · {{ formatDuration(Math.max(0, parseTime(segment.endTime) - parseTime(segment.startTime))) }}</v-col>
                 <v-col cols="auto">
+                  <v-btn color="primary" variant="text" icon @click.stop="moveSegment(index, -1)" :disabled="index === 0">
+                    <v-icon>mdi-arrow-up</v-icon>
+                  </v-btn>
+                  <v-btn color="primary" variant="text" icon @click.stop="moveSegment(index, 1)" :disabled="index === segments.length - 1">
+                    <v-icon>mdi-arrow-down</v-icon>
+                  </v-btn>
+                  <v-btn color="secondary" variant="text" icon @click.stop="duplicateSegment(index)">
+                    <v-icon>mdi-content-copy</v-icon>
+                  </v-btn>
                   <v-btn
                     color="error"
                     variant="text"
@@ -183,6 +301,9 @@ const openTaskCenter = () => {
                   </v-text-field>
                 </v-col>
               </v-row>
+              <v-alert v-if="segmentErrors[index]" type="warning" variant="tonal" class="mt-4">
+                {{ segmentErrors[index] }}
+              </v-alert>
             </v-card-text>
           </v-card>
         </div>
@@ -198,7 +319,7 @@ const openTaskCenter = () => {
         <v-btn color="secondary" variant="tonal" prepend-icon="mdi-progress-clock" @click="openTaskCenter">
           {{ t('taskCenterBtn') }}
         </v-btn>
-        <v-btn color="primary" prepend-icon="mdi-rocket-launch" :loading="loading" @click="createVideoTask">
+        <v-btn color="primary" prepend-icon="mdi-rocket-launch" :loading="loading" :disabled="hasInvalidSegments || !hasValidCodecSelection" @click="createVideoTask">
           {{ t('createVideoTask') }}
         </v-btn>
       </v-card-actions>
@@ -216,5 +337,12 @@ const openTaskCenter = () => {
   background-color: black;
   border-radius: 12px;
   overflow: hidden;
+}
+
+.export-panel {
+  padding: 16px;
+  border-radius: 18px;
+  border: 1px solid var(--border-soft);
+  background: color-mix(in srgb, var(--surface-2) 92%, transparent);
 }
 </style>

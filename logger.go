@@ -31,7 +31,7 @@ func SetupLogger(opts LoggingOptions) error {
 		opts.MaxAgeDays = 7
 	}
 
-	if err := os.MkdirAll(opts.Dir, 0755); err != nil {
+	if err := os.MkdirAll(opts.Dir, 0700); err != nil {
 		return err
 	}
 

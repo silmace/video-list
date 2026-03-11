@@ -1,38 +1,44 @@
 <script setup lang="ts">
 import { computed, onBeforeUnmount, onMounted, ref, watch } from 'vue';
-import { motion } from 'motion-v';
 import { useRoute, useRouter } from 'vue-router';
 import {
-  ArrowLeft,
-  ArrowRight,
+  ArrowUp,
   CheckSquare,
-  Download,
-  File,
-  FileArchive,
-  FileAudio,
-  FileCode,
-  FileImage,
-  FileText,
-  FileVideo,
-  Folder,
+  Copy,
   FolderPlus,
+  History,
   MoveRight,
-  PencilLine,
   RefreshCw,
   Search,
+  Star,
+  Trash2,
   Upload,
-  X,
-  ZoomIn,
-  ZoomOut,
 } from 'lucide-vue-next';
-import type { FileItem, TaskItem } from '../types';
-import { api, buildMediaUrl } from '../services/api';
+import { AxiosError } from 'axios';
+import type { FileFilterType, FileItem, FileSortBy, FileSortOrder } from '../types';
+import { buildMediaUrl } from '../services/api';
+import {
+  createBatchCopyTask,
+  createBatchDeleteTask,
+  createBatchMoveTask,
+  createFolder,
+  listFiles,
+  renameFile,
+  uploadFile,
+} from '../services/files';
+import { fetchTask } from '../services/tasks';
 import PathBreadcrumb from './PathBreadcrumb.vue';
+import FileBrowserPane from './file-manager/FileBrowserPane.vue';
+import DestinationPickerDialog from './file-manager/DestinationPickerDialog.vue';
+import ImagePreviewDialog from './file-manager/ImagePreviewDialog.vue';
 import { authState } from '../composables/useAuth';
-import { useLocale } from '../composables/useLocale';
 import { inferFileType, useFileVisuals } from '../composables/useFileVisuals';
+import { useLocale } from '../composables/useLocale';
 
 type SnackbarTone = 'success' | 'error' | 'warning' | 'info';
+type TransferMode = 'move' | 'copy';
+
+const FAVORITES_STORAGE_KEY = 'video_list_favorites';
 
 const route = useRoute();
 const router = useRouter();
@@ -41,119 +47,211 @@ const { getFileAccent, getMatchingTag, getDominantAccent } = useFileVisuals();
 
 const files = ref<FileItem[]>([]);
 const loading = ref(false);
-const currentPath = ref('');
+const currentPath = ref('/');
 const search = ref('');
-const isMobile = ref(window.innerWidth < 860);
+const sortBy = ref<FileSortBy>('name');
+const sortOrder = ref<FileSortOrder>('asc');
+const typeFilter = ref<FileFilterType>('all');
+const includeHidden = ref(false);
+const isMobile = ref(window.innerWidth < 960);
 const selectedPaths = ref<Set<string>>(new Set());
+const favorites = ref<string[]>(loadFavorites());
 const fileInputRef = ref<HTMLInputElement | null>(null);
 const uploading = ref(false);
 const uploadProgress = ref(0);
 const dragActive = ref(false);
 const dragDepth = ref(0);
-const showMoveDialog = ref(false);
-const submittingMoveTask = ref(false);
-const moveDestination = ref('/');
+const taskPollTimerIds = ref<number[]>([]);
 const showCreateFolderDialog = ref(false);
 const newFolderName = ref('');
 const showRenameDialog = ref(false);
 const renameTargetPath = ref('');
 const renameName = ref('');
 const submittingRename = ref(false);
+const showDeleteDialog = ref(false);
+const showTransferDialog = ref(false);
+const transferMode = ref<TransferMode>('move');
+const transferPath = ref('/');
+const transferFolders = ref<FileItem[]>([]);
+const transferLoading = ref(false);
+const submittingTransfer = ref(false);
 const showImageDialog = ref(false);
 const selectedImageIndex = ref(0);
 const previewScale = ref(1);
 const fitToScreen = ref(true);
-const taskPollTimerIds = ref<number[]>([]);
 const snackbar = ref({ show: false, message: '', tone: 'info' as SnackbarTone });
 let snackbarTimer: number | null = null;
+let filterTimer: number | null = null;
+let syncingRouteQuery = false;
 
 const selectedCount = computed(() => selectedPaths.value.size);
 const hasSelection = computed(() => selectedCount.value > 0);
-const selectedSingleItem = computed(() => {
-  if (selectedCount.value !== 1) {
-    return null;
-  }
-  const [singlePath] = Array.from(selectedPaths.value);
-  return files.value.find((item) => item.path === singlePath) || null;
-});
-
-const displayedFiles = computed(() => {
-  const keyword = search.value.trim().toLowerCase();
-  const list = keyword
-    ? files.value.filter((file) => file.name.toLowerCase().includes(keyword))
-    : files.value;
-
-  return [...list].sort((a, b) => {
-    if (a.isDirectory !== b.isDirectory) {
-      return a.isDirectory ? -1 : 1;
-    }
-    return a.name.localeCompare(b.name);
-  });
-});
-
-const selectedItems = computed(() => displayedFiles.value.filter((item) => selectedPaths.value.has(item.path)));
-const imageFiles = computed(() => displayedFiles.value.filter((file) => isImage(file.name) && !file.isDirectory));
+const selectedItems = computed(() => files.value.filter((item) => selectedPaths.value.has(item.path)));
+const selectedSingleItem = computed(() => (selectedCount.value === 1 ? selectedItems.value[0] || null : null));
+const folderEntries = computed(() => files.value.filter((file) => file.isDirectory));
+const imageFiles = computed(() => files.value.filter((file) => isImage(file.name) && !file.isDirectory));
 const selectedImage = computed(() => imageFiles.value[selectedImageIndex.value] || null);
 const selectedImageUrl = computed(() => (selectedImage.value ? buildMediaUrl(selectedImage.value.path) : ''));
-
+const activeInspectorItem = computed(() => selectedSingleItem.value || files.value[0] || null);
 const accentColor = computed(() => {
   if (selectedItems.value.length > 0) {
     return getFileAccent(selectedItems.value[0]);
   }
-  return getDominantAccent(displayedFiles.value);
+  return getDominantAccent(files.value);
 });
+const transferTitle = computed(() => (transferMode.value === 'copy' ? t('copySelection') : t('moveSelection')));
+const parentPath = computed(() => getParentPath(currentPath.value));
+const filterTypeOptions = computed(() => [
+  { value: 'all', label: t('allTypes') },
+  { value: 'folder', label: t('type_folder') },
+  { value: 'video', label: t('type_video') },
+  { value: 'image', label: t('type_image') },
+  { value: 'audio', label: t('type_audio') },
+  { value: 'archive', label: t('type_archive') },
+  { value: 'document', label: t('type_document') },
+  { value: 'code', label: t('type_code') },
+  { value: 'other', label: t('type_other') },
+]);
 
-const snackbarClass = computed(() => `snackbar-${snackbar.value.tone}`);
+function loadFavorites(): string[] {
+  try {
+    const parsed = JSON.parse(localStorage.getItem(FAVORITES_STORAGE_KEY) || '[]') as string[];
+    return Array.isArray(parsed) ? parsed.filter((value) => typeof value === 'string') : [];
+  } catch {
+    return [];
+  }
+}
 
-const showSnackbar = (message: string, tone: SnackbarTone) => {
+function persistFavorites() {
+  localStorage.setItem(FAVORITES_STORAGE_KEY, JSON.stringify(favorites.value));
+}
+
+function showSnackbar(message: string, tone: SnackbarTone) {
   snackbar.value = { show: true, message, tone };
   if (snackbarTimer !== null) {
     window.clearTimeout(snackbarTimer);
   }
   snackbarTimer = window.setTimeout(() => {
     snackbar.value.show = false;
-  }, 2200);
-};
+  }, 2600);
+}
 
-const normalizePath = (input: string) => {
-  let path = input.trim() || '/';
-  if (!path.startsWith('/')) {
-    path = `/${path}`;
-  }
-  path = path.replace(/\/+/g, '/');
-  if (path !== '/' && !path.endsWith('/')) {
-    path = `${path}/`;
-  }
-  return path;
-};
+function resolveApiErrorMessage(error: unknown, fallback: string): string {
+  const maybeAxios = error as AxiosError<{ error?: string }>;
+  return maybeAxios.response?.data?.error || fallback;
+}
 
-const getPathFromRoute = () => {
+function normalizePath(input: string) {
+  let normalized = input.trim() || '/';
+  if (!normalized.startsWith('/')) {
+    normalized = `/${normalized}`;
+  }
+  normalized = normalized.replace(/\/+/g, '/');
+  if (normalized !== '/' && !normalized.endsWith('/')) {
+    normalized = `${normalized}/`;
+  }
+  return normalized;
+}
+
+function getPathFromRoute() {
   if (!route.params.pathMatch) {
     return '/';
   }
-
   const path = Array.isArray(route.params.pathMatch)
     ? route.params.pathMatch.join('/')
     : route.params.pathMatch;
   return normalizePath(`/${path}`);
-};
+}
 
-const isVideo = (name: string) => /\.(mp4|webm|mov|mkv|m4v|avi)$/i.test(name);
-const isImage = (name: string) => /\.(jpg|jpeg|png|gif|webp|svg|bmp)$/i.test(name);
+function getParentPath(value: string) {
+  if (!value || value === '/') {
+    return '/';
+  }
+  const segments = value.split('/').filter(Boolean);
+  if (segments.length <= 1) {
+    return '/';
+  }
+  return `/${segments.slice(0, -1).join('/')}/`;
+}
 
-const iconFor = (file: FileItem) => {
-  const type = inferFileType(file);
-  if (type === 'folder') return Folder;
-  if (type === 'video') return FileVideo;
-  if (type === 'image') return FileImage;
-  if (type === 'audio') return FileAudio;
-  if (type === 'archive') return FileArchive;
-  if (type === 'document') return FileText;
-  if (type === 'code') return FileCode;
-  return File;
-};
+function readQueryState() {
+  syncingRouteQuery = true;
+  search.value = typeof route.query.search === 'string' ? route.query.search : '';
+  sortBy.value = route.query.sortBy === 'size' || route.query.sortBy === 'modified' ? route.query.sortBy : 'name';
+  sortOrder.value = route.query.order === 'desc' ? 'desc' : 'asc';
+  typeFilter.value = typeof route.query.type === 'string' ? (route.query.type as FileFilterType) : 'all';
+  includeHidden.value = route.query.hidden === '1';
+  syncingRouteQuery = false;
+}
 
-const formatSize = (size: number): string => {
+function buildRouteQuery() {
+  return {
+    ...(search.value.trim() ? { search: search.value.trim() } : {}),
+    ...(sortBy.value !== 'name' ? { sortBy: sortBy.value } : {}),
+    ...(sortOrder.value !== 'asc' ? { order: sortOrder.value } : {}),
+    ...(typeFilter.value !== 'all' ? { type: typeFilter.value } : {}),
+    ...(includeHidden.value ? { hidden: '1' } : {}),
+  };
+}
+
+function scheduleFilterRefresh() {
+  if (syncingRouteQuery) {
+    return;
+  }
+  if (filterTimer !== null) {
+    window.clearTimeout(filterTimer);
+  }
+  filterTimer = window.setTimeout(() => {
+    void fetchFiles(currentPath.value, true);
+  }, 220);
+}
+
+async function fetchFiles(path = '/', pushQuery = false) {
+  const normalizedPath = normalizePath(path);
+  loading.value = true;
+  try {
+    files.value = await listFiles({
+      path: normalizedPath,
+      search: search.value.trim(),
+      sortBy: sortBy.value,
+      order: sortOrder.value,
+      type: typeFilter.value,
+      includeHidden: includeHidden.value,
+    });
+    currentPath.value = normalizedPath;
+    selectedPaths.value.clear();
+
+    if (pushQuery || normalizedPath !== getPathFromRoute()) {
+      await router.replace({
+        path: normalizedPath,
+        query: buildRouteQuery(),
+      });
+    }
+  } catch (error) {
+    showSnackbar(resolveApiErrorMessage(error, t('fetchFilesError')), 'error');
+  } finally {
+    loading.value = false;
+  }
+}
+
+function triggerBrowserDownload(file: FileItem) {
+  const link = document.createElement('a');
+  link.href = buildMediaUrl(file.path);
+  link.download = file.name;
+  document.body.appendChild(link);
+  link.click();
+  link.remove();
+}
+
+function isVideo(name: string) {
+  return inferFileType({ name, isDirectory: false } as FileItem) === 'video';
+}
+
+function isImage(name: string) {
+  return inferFileType({ name, isDirectory: false } as FileItem) === 'image';
+}
+
+function formatSize(size: number): string {
   const units = ['B', 'KB', 'MB', 'GB', 'TB'];
   let value = size;
   let unitIndex = 0;
@@ -162,54 +260,59 @@ const formatSize = (size: number): string => {
     unitIndex += 1;
   }
   return `${value.toFixed(value >= 100 ? 0 : 2)} ${units[unitIndex]}`;
-};
+}
 
-const formatDate = (value: string) => new Date(value).toLocaleString();
+function formatDate(value: string) {
+  return new Date(value).toLocaleString();
+}
 
-const fetchFiles = async (path: string = '/', shouldPush = true) => {
-  const normalizedPath = normalizePath(path);
-  loading.value = true;
-  try {
-    const response = await api.get<FileItem[]>('/api/files', {
-      params: { path: normalizedPath },
-    });
+function isSelected(filePath: string) {
+  return selectedPaths.value.has(filePath);
+}
 
-    files.value = response.data;
-    currentPath.value = normalizedPath;
-    selectedPaths.value.clear();
-
-    if (shouldPush && normalizedPath !== getPathFromRoute()) {
-      await router.push(normalizedPath);
-    }
-  } catch {
-    showSnackbar(t('fetchFilesError'), 'error');
-  } finally {
-    loading.value = false;
+function toggleSelection(filePath: string) {
+  if (selectedPaths.value.has(filePath)) {
+    selectedPaths.value.delete(filePath);
+    return;
   }
-};
+  selectedPaths.value.add(filePath);
+}
 
-const downloadFile = async (file: FileItem) => {
-  try {
-    const response = await api.get('/api/media', {
-      params: { path: file.path },
-      responseType: 'blob',
-    });
+function clearSelection() {
+  selectedPaths.value.clear();
+}
 
-    const url = window.URL.createObjectURL(new Blob([response.data]));
-    const link = document.createElement('a');
-    link.href = url;
-    link.setAttribute('download', file.name);
-    document.body.appendChild(link);
-    link.click();
-    link.remove();
-    window.URL.revokeObjectURL(url);
-    showSnackbar(t('downloadSuccess'), 'success');
-  } catch {
-    showSnackbar(t('downloadError'), 'error');
+function selectAllVisible() {
+  files.value.forEach((item) => selectedPaths.value.add(item.path));
+}
+
+async function openFile(file: FileItem) {
+  if (file.isDirectory) {
+    await fetchFiles(file.path, true);
+    return;
   }
-};
+  if (isVideo(file.name)) {
+    const videoPath = file.path.startsWith('/') ? file.path.slice(1) : file.path;
+    await router.push(`/edit/${videoPath}`);
+    return;
+  }
+  if (isImage(file.name)) {
+    openImagePreview(file);
+    return;
+  }
+  triggerBrowserDownload(file);
+}
 
-const openImagePreview = (file: FileItem) => {
+async function onFileClick(file: FileItem, event: MouseEvent) {
+  const selectIntent = hasSelection.value || event.ctrlKey || event.metaKey || event.shiftKey;
+  if (selectIntent) {
+    toggleSelection(file.path);
+    return;
+  }
+  await openFile(file);
+}
+
+function openImagePreview(file: FileItem) {
   const index = imageFiles.value.findIndex((item) => item.path === file.path);
   if (index < 0) {
     return;
@@ -218,181 +321,79 @@ const openImagePreview = (file: FileItem) => {
   previewScale.value = 1;
   fitToScreen.value = true;
   showImageDialog.value = true;
-};
+}
 
-const openFile = async (file: FileItem) => {
-  if (file.isDirectory) {
-    const nextPath = normalizePath(`${currentPath.value}${file.name}`);
-    await fetchFiles(nextPath);
+function switchImage(step: number) {
+  if (imageFiles.value.length === 0) {
     return;
   }
+  const total = imageFiles.value.length;
+  selectedImageIndex.value = (selectedImageIndex.value + step + total) % total;
+}
 
-  if (isVideo(file.name)) {
-    const videoPath = file.path.startsWith('/') ? file.path.slice(1) : file.path;
-    await router.push(`/edit/${videoPath}`);
+function zoomIn() {
+  previewScale.value = Math.min(3, Number((previewScale.value + 0.2).toFixed(1)));
+}
+
+function zoomOut() {
+  previewScale.value = Math.max(0.4, Number((previewScale.value - 0.2).toFixed(1)));
+}
+
+function closeImageDialog() {
+  showImageDialog.value = false;
+}
+
+function openUploadDialog() {
+  fileInputRef.value?.click();
+}
+
+async function uploadFiles(fileList: File[]) {
+  if (fileList.length === 0) {
     return;
   }
-
-  if (isImage(file.name)) {
-    openImagePreview(file);
-    return;
-  }
-
-  await downloadFile(file);
-};
-
-const onFileClick = async (file: FileItem, event: MouseEvent) => {
-  const selectIntent = hasSelection.value || event.ctrlKey || event.metaKey || event.shiftKey;
-  if (selectIntent) {
-    toggleSelection(file.path);
-    return;
-  }
-
-  await openFile(file);
-};
-
-const isSelected = (file: FileItem) => selectedPaths.value.has(file.path);
-const toggleSelection = (filePath: string) => {
-  if (selectedPaths.value.has(filePath)) {
-    selectedPaths.value.delete(filePath);
-    return;
-  }
-  selectedPaths.value.add(filePath);
-};
-const clearSelection = () => selectedPaths.value.clear();
-
-const selectAllVisible = () => {
-  displayedFiles.value.forEach((item) => selectedPaths.value.add(item.path));
-};
-
-const scheduleTaskPolling = (callback: () => Promise<void>) => {
-  const pollInterval = authState.taskPollIntervalMs.value || 1200;
-  const id = window.setTimeout(async () => {
-    await callback();
-  }, pollInterval);
-  taskPollTimerIds.value.push(id);
-};
-
-const pollTaskCompletion = (taskId: string) => {
-  const poll = async () => {
-    try {
-      const response = await api.get<{ success: boolean; task: TaskItem }>(`/api/tasks/${taskId}`);
-      const task = response.data.task;
-      if (task.status === 'success' || task.status === 'failed' || task.status === 'canceled') {
-        await fetchFiles(currentPath.value, false);
-        return;
-      }
-    } catch {
-      return;
-    }
-    scheduleTaskPolling(poll);
-  };
-
-  scheduleTaskPolling(poll);
-};
-
-const createBatchDeleteTask = async () => {
-  if (!hasSelection.value) {
-    return;
-  }
-
-  const deletingPaths = new Set(selectedPaths.value);
-  try {
-    const response = await api.post<{ success: boolean; taskId: string }>('/api/tasks/batch-delete', {
-      paths: Array.from(deletingPaths),
-    });
-
-    files.value = files.value.filter((item) => !deletingPaths.has(item.path));
-    clearSelection();
-    showSnackbar(t('batchDeleteTaskCreated'), 'success');
-    pollTaskCompletion(response.data.taskId);
-  } catch {
-    showSnackbar(t('batchDeleteTaskError'), 'error');
-  }
-};
-
-const openMoveTaskDialog = () => {
-  moveDestination.value = currentPath.value || '/';
-  showMoveDialog.value = true;
-};
-
-const createBatchMoveTask = async () => {
-  submittingMoveTask.value = true;
-  try {
-    const response = await api.post<{ success: boolean; taskId: string }>('/api/tasks/batch-move', {
-      paths: Array.from(selectedPaths.value),
-      destination: normalizePath(moveDestination.value),
-    });
-
-    showMoveDialog.value = false;
-    clearSelection();
-    showSnackbar(t('batchMoveTaskCreated'), 'success');
-    pollTaskCompletion(response.data.taskId);
-  } catch {
-    showSnackbar(t('batchMoveTaskError'), 'error');
-  } finally {
-    submittingMoveTask.value = false;
-  }
-};
-
-const downloadSelected = async () => {
-  const items = selectedItems.value.filter((item) => !item.isDirectory);
-  if (items.length === 0) {
-    showSnackbar(t('noDownloadableSelected'), 'warning');
-    return;
-  }
-
-  for (const item of items) {
-    if (isImage(item.name) || isVideo(item.name)) {
-      await downloadFile(item);
-      continue;
-    }
-    await openFile(item);
-  }
-};
-
-const uploadFiles = async (uploadList: File[]) => {
-  if (uploadList.length === 0) {
-    return;
-  }
-
   uploading.value = true;
   uploadProgress.value = 0;
 
   try {
-    for (let i = 0; i < uploadList.length; i += 1) {
-      const file = uploadList[i];
-      const formData = new FormData();
-      formData.append('file', file);
-      formData.append('path', currentPath.value || '/');
-
-      await api.post('/api/files/upload', formData, {
-        onUploadProgress: (event) => {
+    for (let index = 0; index < fileList.length; index += 1) {
+      const file = fileList[index];
+      try {
+        await uploadFile(currentPath.value, file, false, (event) => {
           const part = event.total ? event.loaded / event.total : 0;
-          const overall = ((i + part) / uploadList.length) * 100;
+          const overall = ((index + part) / fileList.length) * 100;
           uploadProgress.value = Math.min(100, Math.max(0, Math.round(overall)));
-        },
-      });
+        });
+      } catch (error) {
+        const maybeAxios = error as AxiosError;
+        if (maybeAxios.response?.status === 409) {
+          const shouldOverwrite = window.confirm(t('overwriteConflict', { name: file.name }));
+          if (!shouldOverwrite) {
+            continue;
+          }
+          await uploadFile(currentPath.value, file, true, (event) => {
+            const part = event.total ? event.loaded / event.total : 0;
+            const overall = ((index + part) / fileList.length) * 100;
+            uploadProgress.value = Math.min(100, Math.max(0, Math.round(overall)));
+          });
+          continue;
+        }
+        throw error;
+      }
     }
-
     uploadProgress.value = 100;
     showSnackbar(t('uploadSuccess'), 'success');
-    await fetchFiles(currentPath.value || '/', false);
-  } catch {
-    showSnackbar(t('uploadError'), 'error');
+    await fetchFiles(currentPath.value, false);
+  } catch (error) {
+    showSnackbar(resolveApiErrorMessage(error, t('uploadError')), 'error');
   } finally {
     window.setTimeout(() => {
       uploading.value = false;
       uploadProgress.value = 0;
-    }, 240);
+    }, 260);
   }
-};
+}
 
-const openUploadDialog = () => {
-  fileInputRef.value?.click();
-};
-
-const onFileInputChange = async (event: Event) => {
+async function onFileInputChange(event: Event) {
   const target = event.target as HTMLInputElement;
   const selected = target.files;
   if (!selected) {
@@ -400,30 +401,30 @@ const onFileInputChange = async (event: Event) => {
   }
   await uploadFiles(Array.from(selected));
   target.value = '';
-};
+}
 
-const hasDraggedFiles = (event: DragEvent) => {
+function hasDraggedFiles(event: DragEvent) {
   return Array.from(event.dataTransfer?.types || []).includes('Files');
-};
+}
 
-const onDragEnterShell = (event: DragEvent) => {
+function onDragEnterShell(event: DragEvent) {
   if (!hasDraggedFiles(event)) {
     return;
   }
   dragDepth.value += 1;
   dragActive.value = true;
-};
+}
 
-const onDragOverShell = (event: DragEvent) => {
+function onDragOverShell(event: DragEvent) {
   if (!hasDraggedFiles(event)) {
     return;
   }
   if (event.dataTransfer) {
     event.dataTransfer.dropEffect = 'copy';
   }
-};
+}
 
-const onDragLeaveShell = (event: DragEvent) => {
+function onDragLeaveShell(event: DragEvent) {
   if (!hasDraggedFiles(event)) {
     return;
   }
@@ -431,9 +432,9 @@ const onDragLeaveShell = (event: DragEvent) => {
   if (dragDepth.value === 0) {
     dragActive.value = false;
   }
-};
+}
 
-const onDropShell = async (event: DragEvent) => {
+async function onDropShell(event: DragEvent) {
   if (!hasDraggedFiles(event)) {
     return;
   }
@@ -444,94 +445,169 @@ const onDropShell = async (event: DragEvent) => {
     return;
   }
   await uploadFiles(Array.from(dropped));
-};
+}
 
-const createFolder = async () => {
+async function createFolderAction() {
   const folderName = newFolderName.value.trim();
   if (!folderName) {
     return;
   }
-
   try {
-    await api.post('/api/files/mkdir', {
-      path: currentPath.value || '/',
-      name: folderName,
-    });
+    await createFolder(currentPath.value, folderName);
     showCreateFolderDialog.value = false;
     newFolderName.value = '';
     showSnackbar(t('folderCreated'), 'success');
-    await fetchFiles(currentPath.value || '/', false);
-  } catch {
-    showSnackbar(t('folderCreateError'), 'error');
+    await fetchFiles(currentPath.value, false);
+  } catch (error) {
+    showSnackbar(resolveApiErrorMessage(error, t('folderCreateError')), 'error');
   }
-};
+}
 
-const openRenameDialog = (file: FileItem) => {
+function openRenameDialog(file: FileItem) {
   renameTargetPath.value = file.path;
   renameName.value = file.name;
   showRenameDialog.value = true;
-};
+}
 
-const openRenameDialogForSelection = () => {
-  const item = selectedSingleItem.value;
-  if (!item) {
-    showSnackbar(t('renameSelectionHint'), 'warning');
-    return;
-  }
-  openRenameDialog(item);
-};
-
-const renameFile = async () => {
+async function renameFileAction() {
   const nextName = renameName.value.trim();
   if (!renameTargetPath.value || !nextName) {
     return;
   }
-
   submittingRename.value = true;
   try {
-    await api.post('/api/files/rename', {
-      path: renameTargetPath.value,
-      name: nextName,
-    });
+    await renameFile(renameTargetPath.value, nextName);
     showRenameDialog.value = false;
     showSnackbar(t('renameSuccess'), 'success');
-    await fetchFiles(currentPath.value || '/', false);
-  } catch {
-    showSnackbar(t('renameError'), 'error');
+    await fetchFiles(currentPath.value, false);
+  } catch (error) {
+    showSnackbar(resolveApiErrorMessage(error, t('renameError')), 'error');
   } finally {
     submittingRename.value = false;
   }
-};
+}
 
-const zoomIn = () => {
-  previewScale.value = Math.min(3, Number((previewScale.value + 0.2).toFixed(1)));
-};
+function scheduleTaskPolling(callback: () => Promise<void>) {
+  const pollInterval = authState.taskPollIntervalMs.value || 1200;
+  const id = window.setTimeout(async () => {
+    await callback();
+  }, pollInterval);
+  taskPollTimerIds.value.push(id);
+}
 
-const zoomOut = () => {
-  previewScale.value = Math.max(0.4, Number((previewScale.value - 0.2).toFixed(1)));
-};
+function pollTaskCompletion(taskId: string) {
+  const poll = async () => {
+    try {
+      const task = await fetchTask(taskId);
+      if (task.status === 'success' || task.status === 'failed' || task.status === 'canceled') {
+        await fetchFiles(currentPath.value, false);
+        return;
+      }
+    } catch {
+      return;
+    }
+    scheduleTaskPolling(poll);
+  };
+  scheduleTaskPolling(poll);
+}
 
-const switchImage = (step: number) => {
-  if (imageFiles.value.length === 0) {
+async function createDeleteTask() {
+  if (!hasSelection.value) {
     return;
   }
-  const total = imageFiles.value.length;
-  selectedImageIndex.value = (selectedImageIndex.value + step + total) % total;
-};
+  try {
+    const response = await createBatchDeleteTask(Array.from(selectedPaths.value));
+    showDeleteDialog.value = false;
+    clearSelection();
+    showSnackbar(t('batchDeleteTaskCreated'), 'success');
+    pollTaskCompletion(response.taskId);
+  } catch (error) {
+    showSnackbar(resolveApiErrorMessage(error, t('batchDeleteTaskError')), 'error');
+  }
+}
 
-const closeImageDialog = () => {
-  showImageDialog.value = false;
-};
+async function loadTransferFolders(path: string) {
+  transferLoading.value = true;
+  try {
+    transferFolders.value = (await listFiles({
+      path,
+      sortBy: 'name',
+      order: 'asc',
+      type: 'folder',
+    })).filter((file) => file.isDirectory);
+    transferPath.value = normalizePath(path);
+  } catch (error) {
+    showSnackbar(resolveApiErrorMessage(error, t('fetchFilesError')), 'error');
+  } finally {
+    transferLoading.value = false;
+  }
+}
 
-const onResize = () => {
-  isMobile.value = window.innerWidth < 860;
-};
+async function openTransfer(mode: TransferMode) {
+  transferMode.value = mode;
+  showTransferDialog.value = true;
+  await loadTransferFolders(currentPath.value);
+}
+
+async function submitTransfer() {
+  if (!hasSelection.value) {
+    return;
+  }
+  submittingTransfer.value = true;
+  try {
+    const paths = Array.from(selectedPaths.value);
+    const response = transferMode.value === 'copy'
+      ? await createBatchCopyTask(paths, normalizePath(transferPath.value))
+      : await createBatchMoveTask(paths, normalizePath(transferPath.value));
+    showTransferDialog.value = false;
+    clearSelection();
+    showSnackbar(transferMode.value === 'copy' ? t('copyTaskCreated') : t('batchMoveTaskCreated'), 'success');
+    pollTaskCompletion(response.taskId);
+  } catch (error) {
+    showSnackbar(
+      resolveApiErrorMessage(error, transferMode.value === 'copy' ? t('copyTaskError') : t('batchMoveTaskError')),
+      'error'
+    );
+  } finally {
+    submittingTransfer.value = false;
+  }
+}
+
+function downloadSelected() {
+  const items = selectedItems.value.filter((item) => !item.isDirectory);
+  if (items.length === 0) {
+    showSnackbar(t('noDownloadableSelected'), 'warning');
+    return;
+  }
+  items.forEach(triggerBrowserDownload);
+}
+
+function toggleFavorite(value: string) {
+  const normalized = normalizePath(value);
+  if (favorites.value.includes(normalized)) {
+    favorites.value = favorites.value.filter((item) => item !== normalized);
+    persistFavorites();
+    return;
+  }
+  favorites.value = [normalized, ...favorites.value.filter((item) => item !== normalized)].slice(0, 12);
+  persistFavorites();
+  showSnackbar(t('favoriteAdded'), 'success');
+}
+
+function onResize() {
+  isMobile.value = window.innerWidth < 960;
+}
+
+watch([search, sortBy, sortOrder, typeFilter, includeHidden], () => {
+  scheduleFilterRefresh();
+});
 
 watch(
-  () => route.params.pathMatch,
+  () => [route.params.pathMatch, route.query.search, route.query.sortBy, route.query.order, route.query.type, route.query.hidden],
   () => {
+    readQueryState();
     const path = getPathFromRoute();
-    if (path !== currentPath.value) {
+    if (path !== currentPath.value || files.value.length === 0) {
       void fetchFiles(path, false);
     }
   },
@@ -545,195 +621,226 @@ onMounted(() => {
 onBeforeUnmount(() => {
   window.removeEventListener('resize', onResize);
   taskPollTimerIds.value.forEach((id) => window.clearTimeout(id));
-  taskPollTimerIds.value = [];
   if (snackbarTimer !== null) {
     window.clearTimeout(snackbarTimer);
+  }
+  if (filterTimer !== null) {
+    window.clearTimeout(filterTimer);
   }
 });
 </script>
 
 <template>
   <div
-    class="file-manager-shell"
+    class="file-page"
     :style="{ '--accent': accentColor }"
     @dragenter.prevent="onDragEnterShell"
     @dragover.prevent="onDragOverShell"
     @dragleave.prevent="onDragLeaveShell"
     @drop.prevent="onDropShell"
   >
-    <section class="bento-grid">
-      <article class="glass-card hero-card">
-        <PathBreadcrumb :path="currentPath || '/'" :on-navigate="fetchFiles" />
-
-        <div class="hero-controls">
-          <label class="input-shell search-input">
-            <Search :size="16" />
-            <input v-model="search" :placeholder="t('search')" type="text">
-          </label>
-          <button type="button" class="shad-btn" @click="selectAllVisible">
-            <CheckSquare :size="16" />
-            {{ t('selectAll') }}
+    <section class="hero-panel glass-panel">
+      <div class="hero-head">
+        <div>
+          <div class="section-title">{{ t('filesHubTitle') }}</div>
+          <div class="section-subtitle">{{ t('filesHubSubtitle') }}</div>
+        </div>
+        <div class="hero-actions">
+          <button type="button" class="shad-btn" @click="router.back()">
+            <History :size="16" />
+            {{ t('historyBack') }}
           </button>
-          <button type="button" class="shad-btn" :disabled="loading" @click="fetchFiles(currentPath || '/')">
-            <RefreshCw :size="16" :class="{ spin: loading }" />
-            {{ t('refresh') }}
+          <button type="button" class="shad-btn" @click="fetchFiles(parentPath, true)">
+            <ArrowUp :size="16" />
+            {{ t('goUp') }}
           </button>
-          <button type="button" class="shad-btn" @click="showCreateFolderDialog = true">
-            <FolderPlus :size="16" />
-            {{ t('newFolder') }}
-          </button>
-          <button type="button" class="shad-btn shad-btn-primary" :disabled="uploading" @click="openUploadDialog">
-            <Upload :size="16" />
-            {{ uploading ? t('uploadingNow') : t('upload') }}
+          <button type="button" class="shad-btn" @click="toggleFavorite(currentPath)">
+            <Star :size="16" />
+            {{ favorites.includes(currentPath) ? t('favoriteSaved') : t('addFavorite') }}
           </button>
         </div>
+      </div>
 
-        <motion.div
-          v-if="uploading"
-          class="hero-upload-progress"
-          :initial="{ opacity: 0, y: 8 }"
-          :animate="{ opacity: 1, y: 0 }"
-          :transition="{ type: 'spring', stiffness: 180, damping: 20 }"
-        >
-          <div class="upload-progress-track">
-            <div class="upload-progress-value" :style="{ width: `${uploadProgress}%` }" />
-          </div>
-          <span>{{ uploadProgress }}%</span>
-        </motion.div>
+      <PathBreadcrumb :path="currentPath" :on-navigate="(path) => fetchFiles(path, true)" />
+
+      <div class="controls-grid">
+        <label class="input-shell search-shell">
+          <Search :size="16" />
+          <input v-model="search" :placeholder="t('searchPlaceholder')" type="text">
+        </label>
+
+        <label class="input-shell compact-field">
+          <span>{{ t('sortBy') }}</span>
+          <select v-model="sortBy">
+            <option value="name">{{ t('sort_name') }}</option>
+            <option value="size">{{ t('sort_size') }}</option>
+            <option value="modified">{{ t('sort_modified') }}</option>
+          </select>
+        </label>
+
+        <label class="input-shell compact-field">
+          <span>{{ t('sortOrder') }}</span>
+          <select v-model="sortOrder">
+            <option value="asc">{{ t('order_asc') }}</option>
+            <option value="desc">{{ t('order_desc') }}</option>
+          </select>
+        </label>
+
+        <label class="input-shell compact-field">
+          <span>{{ t('type') }}</span>
+          <select v-model="typeFilter">
+            <option v-for="option in filterTypeOptions" :key="option.value" :value="option.value">{{ option.label }}</option>
+          </select>
+        </label>
+
+        <label class="toggle-row">
+          <input v-model="includeHidden" type="checkbox">
+          <span>{{ t('includeHidden') }}</span>
+        </label>
+      </div>
+
+      <div class="toolbar-row">
+        <button type="button" class="shad-btn" @click="selectAllVisible">
+          <CheckSquare :size="16" />
+          {{ t('selectAll') }}
+        </button>
+        <button type="button" class="shad-btn" :disabled="loading" @click="fetchFiles(currentPath, false)">
+          <RefreshCw :size="16" :class="{ spin: loading }" />
+          {{ t('refresh') }}
+        </button>
+        <button type="button" class="shad-btn" @click="showCreateFolderDialog = true">
+          <FolderPlus :size="16" />
+          {{ t('newFolder') }}
+        </button>
+        <button type="button" class="shad-btn shad-btn-primary" :disabled="uploading" @click="openUploadDialog">
+          <Upload :size="16" />
+          {{ uploading ? t('uploadingNow') : t('upload') }}
+        </button>
+      </div>
+
+      <div v-if="uploading" class="upload-progress-shell">
+        <div class="upload-track">
+          <div class="upload-fill" :style="{ width: `${uploadProgress}%` }" />
+        </div>
+        <span>{{ uploadProgress }}%</span>
+      </div>
+    </section>
+
+    <section class="workspace-grid">
+      <article class="glass-panel workspace-main">
+        <FileBrowserPane
+          :files="files"
+          :loading="loading"
+          :is-mobile="isMobile"
+          :is-selected="isSelected"
+          :get-file-accent="getFileAccent"
+          :get-matching-tag="getMatchingTag"
+          :format-size="formatSize"
+          :format-date="formatDate"
+          @open="onFileClick"
+          @toggle-selection="toggleSelection"
+          @rename="openRenameDialog"
+        />
       </article>
 
-      <article class="glass-card file-list-card">
-        <div class="list-header">
-          <span>{{ t('name') }}</span>
-          <span>{{ t('size') }}</span>
-          <span>{{ t('modified') }}</span>
-        </div>
+      <aside class="glass-panel workspace-side">
+        <section class="side-section">
+          <div class="side-title">{{ t('favorites') }}</div>
+          <div class="favorite-list">
+            <button
+              v-for="favorite in favorites"
+              :key="favorite"
+              type="button"
+              class="favorite-chip"
+              @click="fetchFiles(favorite, true)"
+            >
+              {{ favorite }}
+            </button>
+            <div v-if="favorites.length === 0" class="side-note">{{ t('favoritesEmpty') }}</div>
+          </div>
+        </section>
 
-        <div v-if="loading" class="list-loading">{{ t('loadingFiles') }}</div>
-        <div v-else-if="displayedFiles.length === 0" class="list-empty">{{ t('emptyFolderHint') }}</div>
-
-        <div v-else-if="isMobile" class="mobile-card-list">
-          <div
-            v-for="file in displayedFiles"
-            :key="file.path"
-            class="file-mobile-card"
-            :class="{ selected: isSelected(file) }"
-            @click="onFileClick(file, $event)"
-          >
-            <div class="file-main" :style="{ '--row-accent': getFileAccent(file) }">
-              <button type="button" class="checkbox-hit" @click.stop="toggleSelection(file.path)">
-                <span class="checkbox-dot" :class="{ checked: isSelected(file) }" />
-              </button>
-              <component :is="iconFor(file)" :size="18" />
-              <span class="file-name">{{ file.name }}</span>
-              <button type="button" class="icon-action-btn" @click.stop="openRenameDialog(file)">
-                <PencilLine :size="14" />
-              </button>
-              <span class="file-tag-dot" :style="{ background: getFileAccent(file) }" />
+        <section class="side-section">
+          <div class="side-title">{{ t('inspectorTitle') }}</div>
+          <div v-if="activeInspectorItem" class="inspector-card">
+            <div class="inspector-name">{{ activeInspectorItem.name }}</div>
+            <div class="inspector-meta">
+              <span>{{ activeInspectorItem.isDirectory ? t('type_folder') : t(`type_${inferFileType(activeInspectorItem)}`) }}</span>
+              <span>{{ activeInspectorItem.isDirectory ? '-' : formatSize(activeInspectorItem.size) }}</span>
             </div>
-            <div class="file-sub">
-              <span>{{ file.isDirectory ? '-' : formatSize(file.size) }}</span>
-              <span>{{ formatDate(file.modifiedTime) }}</span>
+            <div class="inspector-meta">{{ formatDate(activeInspectorItem.modifiedTime) }}</div>
+            <div class="inspector-actions">
+              <button type="button" class="shad-btn" @click="openFile(activeInspectorItem)">{{ t('openItem') }}</button>
+              <button type="button" class="shad-btn" @click="openRenameDialog(activeInspectorItem)">{{ t('rename') }}</button>
             </div>
           </div>
-        </div>
+          <div v-else class="side-note">{{ t('noSelectionSummary') }}</div>
+        </section>
 
-        <div v-else class="table-wrap">
-          <table class="file-table">
-            <tbody>
-              <tr
-                v-for="file in displayedFiles"
-                :key="file.path"
-                class="file-row"
-                :class="{ selected: isSelected(file) }"
-                :style="{ '--row-accent': getFileAccent(file) }"
-                @click="onFileClick(file, $event)"
-              >
-                <td class="file-name-cell">
-                  <button
-                    type="button"
-                    class="checkbox-hit"
-                    @click.stop="toggleSelection(file.path)"
-                  >
-                    <span class="checkbox-dot" :class="{ checked: isSelected(file) }" />
-                  </button>
-                  <component :is="iconFor(file)" :size="18" />
-                  <span class="file-name">{{ file.name }}</span>
-                  <button type="button" class="icon-action-btn" @click.stop="openRenameDialog(file)">
-                    <PencilLine :size="14" />
-                  </button>
-                  <span
-                    v-if="getMatchingTag(file)"
-                    class="tag-pill"
-                    :style="{ borderColor: getFileAccent(file), color: getFileAccent(file) }"
-                  >
-                    {{ getMatchingTag(file)?.label }}
-                  </span>
-                </td>
-                <td>{{ file.isDirectory ? '-' : formatSize(file.size) }}</td>
-                <td>{{ formatDate(file.modifiedTime) }}</td>
-              </tr>
-            </tbody>
-          </table>
-        </div>
-      </article>
+        <section class="side-section">
+          <div class="side-title">{{ t('foldersQuickView') }}</div>
+          <div class="folder-grid-side">
+            <button
+              v-for="folder in folderEntries.slice(0, 8)"
+              :key="folder.path"
+              type="button"
+              class="folder-card"
+              @click="fetchFiles(folder.path, true)"
+            >
+              <span>{{ folder.name }}</span>
+            </button>
+            <div v-if="folderEntries.length === 0" class="side-note">{{ t('noFolderAtLevel') }}</div>
+          </div>
+        </section>
+      </aside>
     </section>
 
     <input ref="fileInputRef" type="file" multiple class="hidden" @change="onFileInputChange">
 
-    <motion.div
-      v-if="hasSelection"
-      class="floating-action-bar"
-      :initial="isMobile ? { opacity: 0, y: 24 } : { opacity: 0, y: 24, x: '-50%' }"
-      :animate="isMobile ? { opacity: 1, y: 0 } : { opacity: 1, y: 0, x: '-50%' }"
-      :transition="{ type: 'spring', stiffness: 180, damping: 20 }"
-    >
+    <div v-if="hasSelection" class="floating-action-bar">
       <span class="selection-count">{{ t('selectedCount', { count: selectedCount }) }}</span>
-      <button type="button" class="shad-btn shad-btn-danger" @click="createBatchDeleteTask">
-        <X :size="14" />
+      <button type="button" class="shad-btn shad-btn-danger" @click="showDeleteDialog = true">
+        <Trash2 :size="14" />
         {{ t('delete') }}
       </button>
-      <button type="button" class="shad-btn" @click="openMoveTaskDialog">
+      <button type="button" class="shad-btn" @click="openTransfer('move')">
         <MoveRight :size="14" />
         {{ t('move') }}
       </button>
-      <button type="button" class="shad-btn" @click="downloadSelected">
-        <Download :size="14" />
-        {{ t('download') }}
+      <button type="button" class="shad-btn" @click="openTransfer('copy')">
+        <Copy :size="14" />
+        {{ t('copy') }}
       </button>
-      <button type="button" class="shad-btn" :disabled="selectedCount !== 1" @click="openRenameDialogForSelection">
-        <PencilLine :size="14" />
+      <button type="button" class="shad-btn" @click="downloadSelected">{{ t('download') }}</button>
+      <button type="button" class="shad-btn" :disabled="selectedCount !== 1" @click="selectedSingleItem && openRenameDialog(selectedSingleItem)">
         {{ t('rename') }}
       </button>
       <button type="button" class="shad-btn" @click="clearSelection">{{ t('clear') }}</button>
-    </motion.div>
-
-    <div v-if="showMoveDialog" class="modal-overlay" @click.self="showMoveDialog = false">
-      <div class="modal-card">
-        <h3>{{ t('moveSelection') }}</h3>
-        <label class="input-shell">
-          <input v-model="moveDestination" type="text" :placeholder="t('destinationPath')">
-        </label>
-        <p class="modal-hint">{{ t('destinationHint') }}</p>
-        <div class="modal-actions">
-          <button type="button" class="shad-btn" @click="showMoveDialog = false">{{ t('cancel') }}</button>
-          <button type="button" class="shad-btn shad-btn-primary" :disabled="submittingMoveTask" @click="createBatchMoveTask">
-            {{ t('createTask') }}
-          </button>
-        </div>
-      </div>
     </div>
+
+    <DestinationPickerDialog
+      :open="showTransferDialog"
+      :title="transferTitle"
+      :path="transferPath"
+      :folders="transferFolders"
+      :busy="transferLoading"
+      :submitting="submittingTransfer"
+      @close="showTransferDialog = false"
+      @update-path="(path) => { transferPath = normalizePath(path) }"
+      @browse="loadTransferFolders"
+      @confirm="submitTransfer"
+    />
 
     <div v-if="showCreateFolderDialog" class="modal-overlay" @click.self="showCreateFolderDialog = false">
       <div class="modal-card">
         <h3>{{ t('newFolder') }}</h3>
         <label class="input-shell">
-          <input v-model="newFolderName" type="text" :placeholder="t('folderName')" @keyup.enter="createFolder">
+          <input v-model="newFolderName" type="text" :placeholder="t('folderName')" @keyup.enter="createFolderAction">
         </label>
         <p class="modal-hint">{{ t('folderNameHint') }}</p>
         <div class="modal-actions">
           <button type="button" class="shad-btn" @click="showCreateFolderDialog = false">{{ t('cancel') }}</button>
-          <button type="button" class="shad-btn shad-btn-primary" @click="createFolder">{{ t('create') }}</button>
+          <button type="button" class="shad-btn shad-btn-primary" @click="createFolderAction">{{ t('create') }}</button>
         </div>
       </div>
     </div>
@@ -742,241 +849,316 @@ onBeforeUnmount(() => {
       <div class="modal-card">
         <h3>{{ t('rename') }}</h3>
         <label class="input-shell">
-          <input v-model="renameName" type="text" :placeholder="t('newName')" @keyup.enter="renameFile">
+          <input v-model="renameName" type="text" :placeholder="t('newName')" @keyup.enter="renameFileAction">
         </label>
         <p class="modal-hint">{{ t('renameHint') }}</p>
         <div class="modal-actions">
           <button type="button" class="shad-btn" @click="showRenameDialog = false">{{ t('cancel') }}</button>
-          <button type="button" class="shad-btn shad-btn-primary" :disabled="submittingRename" @click="renameFile">
+          <button type="button" class="shad-btn shad-btn-primary" :disabled="submittingRename" @click="renameFileAction">
             {{ t('rename') }}
           </button>
         </div>
       </div>
     </div>
 
-    <div v-if="showImageDialog && selectedImage" class="modal-overlay image-modal" @click.self="closeImageDialog">
-      <div class="image-modal-card">
-        <header class="image-header">
-          <div class="image-title-wrap">
-            <div class="image-name">{{ selectedImage.name }}</div>
-            <div class="image-inline-meta">
-              <span>{{ selectedImageIndex + 1 }} / {{ imageFiles.length }}</span>
-              <span>{{ formatSize(selectedImage.size) }}</span>
-              <span>{{ formatDate(selectedImage.modifiedTime) }}</span>
-            </div>
-          </div>
-          <div class="image-tools">
-            <button type="button" class="shad-btn shad-btn-sm" @click="switchImage(-1)">
-              <ArrowLeft :size="14" />
-            </button>
-            <button type="button" class="shad-btn shad-btn-sm" @click="switchImage(1)">
-              <ArrowRight :size="14" />
-            </button>
-            <button type="button" class="shad-btn shad-btn-sm" @click="zoomOut">
-              <ZoomOut :size="14" />
-            </button>
-            <button type="button" class="shad-btn shad-btn-sm" @click="zoomIn">
-              <ZoomIn :size="14" />
-            </button>
-            <button type="button" class="shad-btn shad-btn-sm" @click="fitToScreen = !fitToScreen">
-              {{ fitToScreen ? t('originalSize') : t('fitWindow') }}
-            </button>
-            <button type="button" class="shad-btn shad-btn-sm" @click="downloadFile(selectedImage)">
-              <Download :size="14" />
-            </button>
-            <button type="button" class="shad-btn shad-btn-sm" @click="closeImageDialog">
-              <X :size="14" />
-            </button>
-          </div>
-        </header>
-        <div class="image-viewer">
-          <img
-            :src="selectedImageUrl"
-            :alt="selectedImage.name"
-            :class="{ fit: fitToScreen }"
-            :style="{ transform: fitToScreen ? 'none' : `scale(${previewScale})` }"
-          >
+    <div v-if="showDeleteDialog" class="modal-overlay" @click.self="showDeleteDialog = false">
+      <div class="modal-card">
+        <h3>{{ t('deleteSelectionTitle') }}</h3>
+        <p class="modal-hint">{{ t('deleteSelectionHint', { count: selectedCount }) }}</p>
+        <div class="modal-actions">
+          <button type="button" class="shad-btn" @click="showDeleteDialog = false">{{ t('cancel') }}</button>
+          <button type="button" class="shad-btn shad-btn-danger" @click="createDeleteTask">{{ t('confirmDelete') }}</button>
         </div>
-        <footer class="image-footer">
-          <span>{{ selectedImageIndex + 1 }} / {{ imageFiles.length }}</span>
-          <span>{{ formatSize(selectedImage.size) }}</span>
-          <span>{{ formatDate(selectedImage.modifiedTime) }}</span>
-        </footer>
       </div>
     </div>
 
-    <motion.div
-      v-if="snackbar.show"
-      class="snackbar"
-      :class="snackbarClass"
-      :initial="{ opacity: 0, y: 8 }"
-      :animate="{ opacity: 1, y: 0 }"
-      :transition="{ duration: 0.18 }"
-    >
-      {{ snackbar.message }}
-    </motion.div>
+    <ImagePreviewDialog
+      :open="showImageDialog"
+      :file="selectedImage"
+      :index="selectedImageIndex"
+      :total="imageFiles.length"
+      :image-url="selectedImageUrl"
+      :preview-scale="previewScale"
+      :fit-to-screen="fitToScreen"
+      :format-size="formatSize"
+      :format-date="formatDate"
+      @close="closeImageDialog"
+      @previous="switchImage(-1)"
+      @next="switchImage(1)"
+      @zoom-in="zoomIn"
+      @zoom-out="zoomOut"
+      @toggle-fit="fitToScreen = !fitToScreen"
+      @download="selectedImage && triggerBrowserDownload(selectedImage)"
+    />
 
-    <motion.div
-      v-if="dragActive"
-      class="drag-upload-overlay"
-      :initial="{ opacity: 0 }"
-      :animate="{ opacity: 1 }"
-      :exit="{ opacity: 0 }"
-    >
+    <div v-if="snackbar.show" class="snackbar" :class="`snackbar-${snackbar.tone}`">
+      {{ snackbar.message }}
+    </div>
+
+    <div v-if="dragActive" class="drag-upload-overlay">
       <Upload :size="28" />
       <div class="drag-title">{{ t('dragUploadOverlay') }}</div>
       <div class="drag-sub">{{ t('dragUploadSub') }}</div>
-    </motion.div>
+    </div>
   </div>
 </template>
 
 <style scoped>
-.file-manager-shell {
-  padding: 20px;
-  --surface-card: rgba(255, 255, 255, 0.58);
-  --surface-card-border: rgba(226, 232, 240, 0.9);
-  --surface-row: rgba(255, 255, 255, 0.58);
-  --surface-row-border: rgba(226, 232, 240, 0.9);
-  --surface-input: rgba(255, 255, 255, 0.7);
-  --surface-button: rgba(248, 250, 252, 0.88);
-  --surface-modal: rgba(255, 255, 255, 0.94);
-  --text-body: #0f172a;
-  --text-muted: #64748b;
-  --card-shadow: 0 22px 56px rgba(17, 24, 39, 0.14);
-}
-
-:global(body.theme-dark) .file-manager-shell {
-  --surface-card: rgba(10, 15, 26, 0.9);
-  --surface-card-border: rgba(100, 116, 139, 0.22);
-  --surface-row: rgba(10, 15, 26, 0.92);
-  --surface-row-border: rgba(100, 116, 139, 0.2);
-  --surface-input: rgba(10, 15, 26, 0.92);
-  --surface-button: rgba(18, 24, 38, 0.88);
-  --surface-modal: rgba(5, 10, 18, 0.96);
-  --text-body: #e2e8f0;
-  --text-muted: #94a3b8;
-  --card-shadow: 0 22px 56px rgba(2, 8, 18, 0.52);
-}
-
-.bento-grid {
+.file-page {
+  padding: 24px;
   display: grid;
-  gap: 14px;
-  grid-template-columns: 1fr;
+  gap: 16px;
 }
 
-.glass-card {
-  border-radius: 22px;
-  border: 1px solid color-mix(in srgb, var(--accent) 24%, var(--surface-card-border));
-  background: linear-gradient(135deg, color-mix(in srgb, var(--surface-card) 92%, transparent), color-mix(in srgb, var(--surface-card) 72%, transparent));
-  backdrop-filter: blur(16px);
-  box-shadow: var(--card-shadow);
-}
-
-.hero-card {
+.hero-panel,
+.workspace-main,
+.workspace-side {
   padding: 18px;
 }
 
-.hero-controls {
-  margin-top: 14px;
+.hero-head,
+.hero-actions,
+.toolbar-row,
+.inspector-actions,
+.upload-progress-shell {
   display: flex;
+  align-items: center;
+  gap: 10px;
   flex-wrap: wrap;
+}
+
+.hero-head {
+  justify-content: space-between;
+  margin-bottom: 12px;
+}
+
+.controls-grid {
+  margin-top: 14px;
+  display: grid;
+  gap: 10px;
+  grid-template-columns: minmax(220px, 2fr) repeat(3, minmax(140px, 1fr)) auto;
+}
+
+.search-shell {
+  min-width: 0;
+}
+
+.compact-field {
   gap: 8px;
 }
 
-.hero-upload-progress {
-  margin-top: 12px;
-  display: flex;
+.compact-field span,
+.toggle-row,
+.side-note,
+.modal-hint {
+  color: var(--text-2);
+}
+
+.compact-field select,
+.search-shell input {
+  width: 100%;
+  border: none;
+  background: transparent;
+  color: inherit;
+  outline: none;
+}
+
+.toggle-row {
+  display: inline-flex;
   align-items: center;
+  gap: 8px;
+  padding: 0 4px;
+}
+
+.toolbar-row {
+  margin-top: 14px;
+}
+
+.upload-track {
+  flex: 1;
+  min-width: 180px;
+  height: 10px;
+  border-radius: 999px;
+  background: color-mix(in srgb, var(--surface-3) 84%, transparent);
+  overflow: hidden;
+}
+
+.upload-fill {
+  height: 100%;
+  background: linear-gradient(90deg, var(--accent), var(--accent-warm));
+}
+
+.workspace-grid {
+  display: grid;
+  gap: 16px;
+  grid-template-columns: minmax(0, 1.6fr) minmax(280px, 0.8fr);
+}
+
+.workspace-side {
+  display: grid;
+  gap: 16px;
+  align-content: start;
+}
+
+.side-section {
+  display: grid;
   gap: 10px;
 }
 
-.file-list-card {
-  padding: 14px;
-  min-height: 420px;
-}
-
-.list-header {
-  display: grid;
-  grid-template-columns: 1.2fr 130px 180px;
-  padding: 8px 10px;
+.side-title {
   font-size: 12px;
   text-transform: uppercase;
   letter-spacing: 0.08em;
-  color: var(--text-muted);
+  color: var(--text-3);
 }
 
-.list-loading,
-.list-empty {
-  color: var(--text-muted);
-  padding: 20px 12px;
+.favorite-list,
+.folder-grid-side {
+  display: grid;
+  gap: 8px;
 }
 
-.table-wrap {
-  overflow: auto;
-}
-
-.file-table {
-  width: 100%;
-  border-collapse: separate;
-  border-spacing: 0 8px;
-}
-
-.file-row {
+.favorite-chip,
+.folder-card {
+  border: 1px solid var(--border-soft);
+  border-radius: var(--radius-sm);
+  background: color-mix(in srgb, var(--surface-2) 94%, transparent);
+  color: var(--text-1);
+  padding: 10px 12px;
+  text-align: left;
   cursor: pointer;
 }
 
-.file-row td {
-  background: var(--surface-row);
-  padding: 11px 12px;
-  border-top: 1px solid var(--surface-row-border);
-  border-bottom: 1px solid var(--surface-row-border);
+.favorite-chip:hover,
+.folder-card:hover {
+  border-color: color-mix(in srgb, var(--accent) 34%, var(--border-soft));
 }
 
-.file-row td:first-child {
-  border-left: 1px solid var(--surface-row-border);
-  border-radius: 12px 0 0 12px;
+.inspector-card {
+  padding: 14px;
+  border-radius: var(--radius-md);
+  border: 1px solid var(--border-soft);
+  background: color-mix(in srgb, var(--surface-2) 96%, transparent);
 }
 
-.file-row td:last-child {
-  border-right: 1px solid var(--surface-row-border);
-  border-radius: 0 12px 12px 0;
+.inspector-name {
+  font-weight: 800;
+  margin-bottom: 8px;
 }
 
-.file-row:hover td {
-  border-color: color-mix(in srgb, var(--row-accent) 45%, var(--surface-row-border));
-  background: color-mix(in srgb, var(--row-accent) 16%, var(--surface-row));
-}
-
-.file-row.selected td {
-  background: color-mix(in srgb, var(--row-accent) 20%, var(--surface-row));
-}
-
-.file-name-cell {
+.inspector-meta {
+  color: var(--text-2);
   display: flex;
-  align-items: center;
   gap: 10px;
+  flex-wrap: wrap;
+  margin-bottom: 8px;
 }
 
-.file-name {
-  max-width: 460px;
-  overflow: hidden;
-  text-overflow: ellipsis;
-  white-space: nowrap;
+.floating-action-bar {
+  position: sticky;
+  bottom: 18px;
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 8px;
+  padding: 12px;
+  margin-inline: auto;
+  width: fit-content;
+  max-width: calc(100vw - 48px);
+  border: 1px solid var(--border-soft);
+  border-radius: 999px;
+  background: color-mix(in srgb, var(--surface-1) 92%, transparent);
+  box-shadow: var(--shadow-lg);
+  z-index: 12;
 }
 
-.checkbox-hit {
-  border: none;
-  background: transparent;
-  padding: 0;
-  cursor: pointer;
+.selection-count {
+  color: var(--text-2);
+  font-weight: 700;
+  padding-inline: 8px;
 }
 
-.checkbox-dot {
-  width: 16px;
-  height: 16px;
-  border-radius: 5px;
-  border: 1px solid #94a3b8;
-  display: inline-block;
+.snackbar {
+  position: fixed;
+  right: 24px;
+  bottom: 24px;
+  padding: 12px 16px;
+  border-radius: 16px;
+  color: #fff;
+  box-shadow: var(--shadow-lg);
+  z-index: 30;
+}
+
+.snackbar-success {
+  background: #166534;
+}
+
+.snackbar-error,
+.snackbar-warning {
+  background: #b45309;
+}
+
+.snackbar-info {
+  background: #0f766e;
+}
+
+.drag-upload-overlay {
+  position: fixed;
+  inset: 16px;
+  display: grid;
+  place-items: center;
+  align-content: center;
+  gap: 8px;
+  border-radius: 32px;
+  border: 1px dashed color-mix(in srgb, var(--accent) 44%, var(--border-soft));
+  background: color-mix(in srgb, var(--surface-1) 78%, transparent);
+  box-shadow: var(--shadow-xl);
+  backdrop-filter: blur(20px);
+  z-index: 24;
+}
+
+.drag-title {
+  font-size: 1.2rem;
+  font-weight: 800;
+}
+
+.drag-sub {
+  color: var(--text-2);
+}
+
+.spin {
+  animation: spin 1s linear infinite;
+}
+
+@keyframes spin {
+  to {
+    transform: rotate(360deg);
+  }
+}
+
+@media (max-width: 1120px) {
+  .controls-grid {
+    grid-template-columns: repeat(2, minmax(0, 1fr));
+  }
+
+  .workspace-grid {
+    grid-template-columns: 1fr;
+  }
+}
+
+@media (max-width: 720px) {
+  .file-page {
+    padding: 16px;
+  }
+
+  .controls-grid {
+    grid-template-columns: 1fr;
+  }
+
+  .floating-action-bar {
+    border-radius: 22px;
+    width: calc(100vw - 32px);
+  }
 }
 
 .checkbox-dot.checked {
