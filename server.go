@@ -1,7 +1,9 @@
 package main
 
 import (
+	"crypto/rand"
 	"embed"
+	"encoding/hex"
 	"encoding/json"
 	"errors"
 	"flag"
@@ -16,7 +18,11 @@ import (
 	"path/filepath"
 	"strconv"
 	"strings"
+	"sync"
 	"time"
+	"unicode"
+
+	"golang.org/x/crypto/bcrypt"
 )
 
 //go:embed dist/*
@@ -40,6 +46,105 @@ type Segment struct {
 type VideoEditRequest struct {
 	VideoPath string    `json:"videoPath"`
 	Segments  []Segment `json:"segments"`
+}
+
+// AppConfig holds persistent server configuration (stored with 0600 permissions).
+type AppConfig struct {
+	PasswordHash string `json:"passwordHash"`
+}
+
+// loginAttempt tracks failed login tries for a given IP.
+type loginAttempt struct {
+	count     int
+	windowEnd time.Time
+}
+
+const (
+	loginRateWindow  = time.Minute
+	loginMaxAttempts = 5
+	configFileName   = "video-list-config.json"
+)
+
+var (
+	loginMu       sync.Mutex
+	loginAttempts = make(map[string]*loginAttempt)
+	appConfig     AppConfig
+	configPath    string
+)
+
+// sanitizeHeaderValue removes newlines and control characters from a header
+// value to prevent log injection.
+func sanitizeHeaderValue(s string) string {
+	return strings.Map(func(r rune) rune {
+		if r == '\n' || r == '\r' || !unicode.IsPrint(r) {
+			return -1
+		}
+		return r
+	}, s)
+}
+
+// checkLoginRateLimit returns true when the IP is allowed to attempt login.
+// It increments the attempt counter and blocks once the limit is exceeded.
+func checkLoginRateLimit(ip string) bool {
+	loginMu.Lock()
+	defer loginMu.Unlock()
+
+	now := time.Now()
+	a, ok := loginAttempts[ip]
+	if !ok || now.After(a.windowEnd) {
+		loginAttempts[ip] = &loginAttempt{count: 1, windowEnd: now.Add(loginRateWindow)}
+		return true
+	}
+	if a.count >= loginMaxAttempts {
+		return false
+	}
+	a.count++
+	return true
+}
+
+// loadConfig reads the app config file. If it does not exist it creates a
+// default one with a random password and writes it with 0600 permissions so
+// that the password hash is not readable by other OS users.
+func loadConfig(path string) error {
+	data, err := os.ReadFile(path)
+	if err != nil {
+		if os.IsNotExist(err) {
+			return initDefaultConfig(path)
+		}
+		return fmt.Errorf("reading config: %w", err)
+	}
+	return json.Unmarshal(data, &appConfig)
+}
+
+func initDefaultConfig(path string) error {
+	raw := make([]byte, 16)
+	if _, err := rand.Read(raw); err != nil {
+		return fmt.Errorf("generating default password: %w", err)
+	}
+	defaultPass := hex.EncodeToString(raw)
+	hash, err := bcrypt.GenerateFromPassword([]byte(defaultPass), bcrypt.DefaultCost)
+	if err != nil {
+		return fmt.Errorf("hashing default password: %w", err)
+	}
+	appConfig = AppConfig{PasswordHash: string(hash)}
+	if err := saveConfig(path); err != nil {
+		return err
+	}
+	log.Printf("No config found. Generated default password: %s — change it via POST /api/set-password", defaultPass)
+	return nil
+}
+
+// saveConfig writes the config file with 0600 permissions so that the
+// password hash is only readable by the process owner.
+func saveConfig(path string) error {
+	data, err := json.Marshal(appConfig)
+	if err != nil {
+		return fmt.Errorf("marshalling config: %w", err)
+	}
+	if err := os.WriteFile(path, data, 0600); err != nil {
+		return fmt.Errorf("writing config: %w", err)
+	}
+	return nil
 }
 
 func toRelativePath(path string) string {
@@ -81,8 +186,16 @@ func main() {
 
 	log.SetOutput(logFile)
 
+	// Determine config path and load / create app config.
+	configPath = filepath.Join(filepath.Dir(os.Args[0]), configFileName)
+	if err := loadConfig(configPath); err != nil {
+		log.Fatal("Failed to load config:", err)
+	}
+
 	mux := http.NewServeMux()
 
+	mux.HandleFunc("/api/login", handleLogin)
+	mux.HandleFunc("/api/set-password", handleSetPassword)
 	mux.HandleFunc("/api/files", handleFiles)
 	mux.HandleFunc("/api/media", handleMediaStream)
 	mux.HandleFunc("/api/edit-video", handleEditVideo)
@@ -126,9 +239,105 @@ func main() {
 	})
 
 	fmt.Println("Server running on http://localhost:3001")
-	if err := http.ListenAndServe(":3001", mux); err != nil {
+	if err := http.ListenAndServe(":3001", requestIDMiddleware(mux)); err != nil {
 		log.Fatal(err)
 	}
+}
+
+// requestIDMiddleware reads the X-Request-ID header, sanitizes it to prevent
+// log injection, propagates the clean value in a response header, and logs it.
+func requestIDMiddleware(next http.Handler) http.Handler {
+	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		rawID := r.Header.Get("X-Request-ID")
+		safeID := sanitizeHeaderValue(rawID)
+		if safeID != "" {
+			w.Header().Set("X-Request-ID", safeID)
+			log.Printf("X-Request-ID: %s %s %s", safeID, r.Method, r.URL.Path)
+		}
+		next.ServeHTTP(w, r)
+	})
+}
+
+// handleLogin authenticates the user. The login endpoint is rate-limited to
+// prevent brute-force attacks: at most loginMaxAttempts per IP per loginRateWindow.
+// Only r.RemoteAddr is used for rate limiting — X-Forwarded-For is intentionally
+// ignored because it can be forged by clients to bypass the rate limit.
+func handleLogin(w http.ResponseWriter, r *http.Request) {
+	if r.Method != http.MethodPost {
+		http.Error(w, "Method Not Allowed", http.StatusMethodNotAllowed)
+		return
+	}
+
+	ip := r.RemoteAddr
+
+	if !checkLoginRateLimit(ip) {
+		http.Error(w, "Too Many Requests", http.StatusTooManyRequests)
+		log.Printf("Login rate-limited for IP: %s", ip)
+		return
+	}
+
+	var creds struct {
+		Password string `json:"password"`
+	}
+	if err := json.NewDecoder(r.Body).Decode(&creds); err != nil {
+		http.Error(w, "Invalid request payload", http.StatusBadRequest)
+		return
+	}
+
+	if err := bcrypt.CompareHashAndPassword([]byte(appConfig.PasswordHash), []byte(creds.Password)); err != nil {
+		http.Error(w, "Unauthorized", http.StatusUnauthorized)
+		log.Printf("Failed login attempt from IP: %s", ip)
+		return
+	}
+
+	log.Printf("Successful login from IP: %s", ip)
+	w.Header().Set("Content-Type", "application/json")
+	_, _ = w.Write([]byte(`{"success": true}`))
+}
+
+// handleSetPassword lets an authenticated user change the server password.
+// The new hash is written to the config file with 0600 permissions.
+func handleSetPassword(w http.ResponseWriter, r *http.Request) {
+	if r.Method != http.MethodPost {
+		http.Error(w, "Method Not Allowed", http.StatusMethodNotAllowed)
+		return
+	}
+
+	var body struct {
+		CurrentPassword string `json:"currentPassword"`
+		NewPassword     string `json:"newPassword"`
+	}
+	if err := json.NewDecoder(r.Body).Decode(&body); err != nil {
+		http.Error(w, "Invalid request payload", http.StatusBadRequest)
+		return
+	}
+
+	if err := bcrypt.CompareHashAndPassword([]byte(appConfig.PasswordHash), []byte(body.CurrentPassword)); err != nil {
+		http.Error(w, "Unauthorized", http.StatusUnauthorized)
+		return
+	}
+
+	if len(body.NewPassword) < 8 {
+		http.Error(w, "New password must be at least 8 characters", http.StatusBadRequest)
+		return
+	}
+
+	hash, err := bcrypt.GenerateFromPassword([]byte(body.NewPassword), bcrypt.DefaultCost)
+	if err != nil {
+		http.Error(w, "Internal Server Error", http.StatusInternalServerError)
+		log.Println("Error hashing new password:", err)
+		return
+	}
+
+	appConfig.PasswordHash = string(hash)
+	if err := saveConfig(configPath); err != nil {
+		http.Error(w, "Internal Server Error", http.StatusInternalServerError)
+		log.Println("Error saving config:", err)
+		return
+	}
+
+	w.Header().Set("Content-Type", "application/json")
+	_, _ = w.Write([]byte(`{"success": true}`))
 }
 
 func handleFiles(w http.ResponseWriter, r *http.Request) {
