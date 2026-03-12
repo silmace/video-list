@@ -9,7 +9,6 @@ function buildFileParams(options: FileQueryOptions) {
     sortBy: options.sortBy || undefined,
     order: options.order || undefined,
     type: options.type && options.type !== 'all' ? options.type : undefined,
-    includeHidden: options.includeHidden ? '1' : undefined,
   };
 }
 

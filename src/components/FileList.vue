@@ -2,14 +2,13 @@
 import { computed, onBeforeUnmount, onMounted, ref, watch } from 'vue';
 import { useRoute, useRouter } from 'vue-router';
 import {
-  ArrowUp,
-  CheckSquare,
+  ChevronLeft,
+  ChevronRight,
   Copy,
   FolderPlus,
-  History,
   MoveRight,
   RefreshCw,
-  Search,
+  Settings2,
   Star,
   Trash2,
   Upload,
@@ -48,12 +47,11 @@ const { getFileAccent, getMatchingTag, getDominantAccent } = useFileVisuals();
 const files = ref<FileItem[]>([]);
 const loading = ref(false);
 const currentPath = ref('/');
-const search = ref('');
 const sortBy = ref<FileSortBy>('name');
 const sortOrder = ref<FileSortOrder>('asc');
 const typeFilter = ref<FileFilterType>('all');
-const includeHidden = ref(false);
 const isMobile = ref(window.innerWidth < 960);
+const toolbarExpanded = ref(false);
 const selectedPaths = ref<Set<string>>(new Set());
 const favorites = ref<string[]>(loadFavorites());
 const fileInputRef = ref<HTMLInputElement | null>(null);
@@ -88,11 +86,10 @@ const selectedCount = computed(() => selectedPaths.value.size);
 const hasSelection = computed(() => selectedCount.value > 0);
 const selectedItems = computed(() => files.value.filter((item) => selectedPaths.value.has(item.path)));
 const selectedSingleItem = computed(() => (selectedCount.value === 1 ? selectedItems.value[0] || null : null));
-const folderEntries = computed(() => files.value.filter((file) => file.isDirectory));
 const imageFiles = computed(() => files.value.filter((file) => isImage(file.name) && !file.isDirectory));
 const selectedImage = computed(() => imageFiles.value[selectedImageIndex.value] || null);
 const selectedImageUrl = computed(() => (selectedImage.value ? buildMediaUrl(selectedImage.value.path) : ''));
-const activeInspectorItem = computed(() => selectedSingleItem.value || files.value[0] || null);
+const allVisibleSelected = computed(() => files.value.length > 0 && selectedPaths.value.size === files.value.length);
 const accentColor = computed(() => {
   if (selectedItems.value.length > 0) {
     return getFileAccent(selectedItems.value[0]);
@@ -100,18 +97,6 @@ const accentColor = computed(() => {
   return getDominantAccent(files.value);
 });
 const transferTitle = computed(() => (transferMode.value === 'copy' ? t('copySelection') : t('moveSelection')));
-const parentPath = computed(() => getParentPath(currentPath.value));
-const filterTypeOptions = computed(() => [
-  { value: 'all', label: t('allTypes') },
-  { value: 'folder', label: t('type_folder') },
-  { value: 'video', label: t('type_video') },
-  { value: 'image', label: t('type_image') },
-  { value: 'audio', label: t('type_audio') },
-  { value: 'archive', label: t('type_archive') },
-  { value: 'document', label: t('type_document') },
-  { value: 'code', label: t('type_code') },
-  { value: 'other', label: t('type_other') },
-]);
 
 function loadFavorites(): string[] {
   try {
@@ -134,6 +119,15 @@ function showSnackbar(message: string, tone: SnackbarTone) {
   snackbarTimer = window.setTimeout(() => {
     snackbar.value.show = false;
   }, 2600);
+}
+
+function handleSort(field: FileSortBy) {
+  if (sortBy.value === field) {
+    sortOrder.value = sortOrder.value === 'asc' ? 'desc' : 'asc';
+    return;
+  }
+  sortBy.value = field;
+  sortOrder.value = field === 'name' ? 'asc' : 'desc';
 }
 
 function resolveApiErrorMessage(error: unknown, fallback: string): string {
@@ -163,34 +157,19 @@ function getPathFromRoute() {
   return normalizePath(`/${path}`);
 }
 
-function getParentPath(value: string) {
-  if (!value || value === '/') {
-    return '/';
-  }
-  const segments = value.split('/').filter(Boolean);
-  if (segments.length <= 1) {
-    return '/';
-  }
-  return `/${segments.slice(0, -1).join('/')}/`;
-}
-
 function readQueryState() {
   syncingRouteQuery = true;
-  search.value = typeof route.query.search === 'string' ? route.query.search : '';
   sortBy.value = route.query.sortBy === 'size' || route.query.sortBy === 'modified' ? route.query.sortBy : 'name';
   sortOrder.value = route.query.order === 'desc' ? 'desc' : 'asc';
   typeFilter.value = typeof route.query.type === 'string' ? (route.query.type as FileFilterType) : 'all';
-  includeHidden.value = route.query.hidden === '1';
   syncingRouteQuery = false;
 }
 
 function buildRouteQuery() {
   return {
-    ...(search.value.trim() ? { search: search.value.trim() } : {}),
     ...(sortBy.value !== 'name' ? { sortBy: sortBy.value } : {}),
     ...(sortOrder.value !== 'asc' ? { order: sortOrder.value } : {}),
     ...(typeFilter.value !== 'all' ? { type: typeFilter.value } : {}),
-    ...(includeHidden.value ? { hidden: '1' } : {}),
   };
 }
 
@@ -212,11 +191,9 @@ async function fetchFiles(path = '/', pushQuery = false) {
   try {
     files.value = await listFiles({
       path: normalizedPath,
-      search: search.value.trim(),
       sortBy: sortBy.value,
       order: sortOrder.value,
       type: typeFilter.value,
-      includeHidden: includeHidden.value,
     });
     currentPath.value = normalizedPath;
     selectedPaths.value.clear();
@@ -286,6 +263,14 @@ function selectAllVisible() {
   files.value.forEach((item) => selectedPaths.value.add(item.path));
 }
 
+function toggleSelectAllVisible() {
+  if (allVisibleSelected.value) {
+    clearSelection();
+    return;
+  }
+  selectAllVisible();
+}
+
 async function openFile(file: FileItem) {
   if (file.isDirectory) {
     await fetchFiles(file.path, true);
@@ -332,11 +317,20 @@ function switchImage(step: number) {
 }
 
 function zoomIn() {
+  fitToScreen.value = false;
   previewScale.value = Math.min(3, Number((previewScale.value + 0.2).toFixed(1)));
 }
 
 function zoomOut() {
+  fitToScreen.value = false;
   previewScale.value = Math.max(0.4, Number((previewScale.value - 0.2).toFixed(1)));
+}
+
+function toggleFitMode() {
+  fitToScreen.value = !fitToScreen.value;
+  if (!fitToScreen.value && previewScale.value === 1) {
+    previewScale.value = 1.1;
+  }
 }
 
 function closeImageDialog() {
@@ -595,15 +589,19 @@ function toggleFavorite(value: string) {
 }
 
 function onResize() {
-  isMobile.value = window.innerWidth < 960;
+  const nextMobile = window.innerWidth < 960;
+  if (nextMobile && !isMobile.value) {
+    toolbarExpanded.value = false;
+  }
+  isMobile.value = nextMobile;
 }
 
-watch([search, sortBy, sortOrder, typeFilter, includeHidden], () => {
+watch([sortBy, sortOrder, typeFilter], () => {
   scheduleFilterRefresh();
 });
 
 watch(
-  () => [route.params.pathMatch, route.query.search, route.query.sortBy, route.query.order, route.query.type, route.query.hidden],
+  () => [route.params.pathMatch, route.query.sortBy, route.query.order, route.query.type],
   () => {
     readQueryState();
     const path = getPathFromRoute();
@@ -639,71 +637,20 @@ onBeforeUnmount(() => {
     @dragleave.prevent="onDragLeaveShell"
     @drop.prevent="onDropShell"
   >
-    <section class="hero-panel glass-panel">
-      <div class="hero-head">
-        <div>
-          <div class="section-title">{{ t('filesHubTitle') }}</div>
-          <div class="section-subtitle">{{ t('filesHubSubtitle') }}</div>
-        </div>
-        <div class="hero-actions">
-          <button type="button" class="shad-btn" @click="router.back()">
-            <History :size="16" />
-            {{ t('historyBack') }}
-          </button>
-          <button type="button" class="shad-btn" @click="fetchFiles(parentPath, true)">
-            <ArrowUp :size="16" />
-            {{ t('goUp') }}
-          </button>
-          <button type="button" class="shad-btn" @click="toggleFavorite(currentPath)">
-            <Star :size="16" />
-            {{ favorites.includes(currentPath) ? t('favoriteSaved') : t('addFavorite') }}
-          </button>
-        </div>
-      </div>
+    <aside class="left-toolbar-box" :class="{ open: toolbarExpanded }">
+      <button
+        type="button"
+        class="toolbar-toggle-btn"
+        :aria-label="toolbarExpanded ? t('collapseToolbar') : t('expandToolbar')"
+        @click="toolbarExpanded = !toolbarExpanded"
+      >
+        <Settings2 :size="16" />
+        <span v-if="toolbarExpanded">{{ t('toolbar') }}</span>
+        <ChevronLeft v-if="toolbarExpanded" :size="14" />
+        <ChevronRight v-else :size="14" />
+      </button>
 
-      <PathBreadcrumb :path="currentPath" :on-navigate="(path) => fetchFiles(path, true)" />
-
-      <div class="controls-grid">
-        <label class="input-shell search-shell">
-          <Search :size="16" />
-          <input v-model="search" :placeholder="t('searchPlaceholder')" type="text">
-        </label>
-
-        <label class="input-shell compact-field">
-          <span>{{ t('sortBy') }}</span>
-          <select v-model="sortBy">
-            <option value="name">{{ t('sort_name') }}</option>
-            <option value="size">{{ t('sort_size') }}</option>
-            <option value="modified">{{ t('sort_modified') }}</option>
-          </select>
-        </label>
-
-        <label class="input-shell compact-field">
-          <span>{{ t('sortOrder') }}</span>
-          <select v-model="sortOrder">
-            <option value="asc">{{ t('order_asc') }}</option>
-            <option value="desc">{{ t('order_desc') }}</option>
-          </select>
-        </label>
-
-        <label class="input-shell compact-field">
-          <span>{{ t('type') }}</span>
-          <select v-model="typeFilter">
-            <option v-for="option in filterTypeOptions" :key="option.value" :value="option.value">{{ option.label }}</option>
-          </select>
-        </label>
-
-        <label class="toggle-row">
-          <input v-model="includeHidden" type="checkbox">
-          <span>{{ t('includeHidden') }}</span>
-        </label>
-      </div>
-
-      <div class="toolbar-row">
-        <button type="button" class="shad-btn" @click="selectAllVisible">
-          <CheckSquare :size="16" />
-          {{ t('selectAll') }}
-        </button>
+      <div v-if="toolbarExpanded" class="toolbar-list">
         <button type="button" class="shad-btn" :disabled="loading" @click="fetchFiles(currentPath, false)">
           <RefreshCw :size="16" :class="{ spin: loading }" />
           {{ t('refresh') }}
@@ -716,13 +663,25 @@ onBeforeUnmount(() => {
           <Upload :size="16" />
           {{ uploading ? t('uploadingNow') : t('upload') }}
         </button>
-      </div>
+        <button type="button" class="shad-btn" @click="toggleFavorite(currentPath)">
+          <Star :size="16" />
+          {{ favorites.includes(currentPath) ? t('favoriteSaved') : t('addFavorite') }}
+        </button>
 
-      <div v-if="uploading" class="upload-progress-shell">
-        <div class="upload-track">
-          <div class="upload-fill" :style="{ width: `${uploadProgress}%` }" />
+        <div v-if="uploading" class="upload-progress-shell">
+          <div class="upload-track">
+            <div class="upload-fill" :style="{ width: `${uploadProgress}%` }" />
+          </div>
+          <span>{{ uploadProgress }}%</span>
         </div>
-        <span>{{ uploadProgress }}%</span>
+      </div>
+    </aside>
+
+    <section class="hero-panel glass-panel">
+      <PathBreadcrumb :path="currentPath" :on-navigate="(path) => fetchFiles(path, true)" />
+      <div class="hero-summary">
+        <span>{{ t('itemsCount', { count: files.length }) }}</span>
+        <span>{{ t('selectedCount', { count: selectedCount }) }}</span>
       </div>
     </section>
 
@@ -732,13 +691,19 @@ onBeforeUnmount(() => {
           :files="files"
           :loading="loading"
           :is-mobile="isMobile"
+          :has-files="files.length > 0"
+          :all-selected="allVisibleSelected"
           :is-selected="isSelected"
           :get-file-accent="getFileAccent"
           :get-matching-tag="getMatchingTag"
           :format-size="formatSize"
           :format-date="formatDate"
+          :sort-by="sortBy"
+          :sort-order="sortOrder"
+          @sort="handleSort"
           @open="onFileClick"
           @toggle-selection="toggleSelection"
+          @toggle-select-all="toggleSelectAllVisible"
           @rename="openRenameDialog"
         />
       </article>
@@ -757,39 +722,6 @@ onBeforeUnmount(() => {
               {{ favorite }}
             </button>
             <div v-if="favorites.length === 0" class="side-note">{{ t('favoritesEmpty') }}</div>
-          </div>
-        </section>
-
-        <section class="side-section">
-          <div class="side-title">{{ t('inspectorTitle') }}</div>
-          <div v-if="activeInspectorItem" class="inspector-card">
-            <div class="inspector-name">{{ activeInspectorItem.name }}</div>
-            <div class="inspector-meta">
-              <span>{{ activeInspectorItem.isDirectory ? t('type_folder') : t(`type_${inferFileType(activeInspectorItem)}`) }}</span>
-              <span>{{ activeInspectorItem.isDirectory ? '-' : formatSize(activeInspectorItem.size) }}</span>
-            </div>
-            <div class="inspector-meta">{{ formatDate(activeInspectorItem.modifiedTime) }}</div>
-            <div class="inspector-actions">
-              <button type="button" class="shad-btn" @click="openFile(activeInspectorItem)">{{ t('openItem') }}</button>
-              <button type="button" class="shad-btn" @click="openRenameDialog(activeInspectorItem)">{{ t('rename') }}</button>
-            </div>
-          </div>
-          <div v-else class="side-note">{{ t('noSelectionSummary') }}</div>
-        </section>
-
-        <section class="side-section">
-          <div class="side-title">{{ t('foldersQuickView') }}</div>
-          <div class="folder-grid-side">
-            <button
-              v-for="folder in folderEntries.slice(0, 8)"
-              :key="folder.path"
-              type="button"
-              class="folder-card"
-              @click="fetchFiles(folder.path, true)"
-            >
-              <span>{{ folder.name }}</span>
-            </button>
-            <div v-if="folderEntries.length === 0" class="side-note">{{ t('noFolderAtLevel') }}</div>
           </div>
         </section>
       </aside>
@@ -887,7 +819,7 @@ onBeforeUnmount(() => {
       @next="switchImage(1)"
       @zoom-in="zoomIn"
       @zoom-out="zoomOut"
-      @toggle-fit="fitToScreen = !fitToScreen"
+      @toggle-fit="toggleFitMode"
       @download="selectedImage && triggerBrowserDownload(selectedImage)"
     />
 
@@ -905,79 +837,17 @@ onBeforeUnmount(() => {
 
 <style scoped>
 .file-page {
-  padding: 24px;
+  position: relative;
+  padding: 20px;
+  padding-left: 86px;
   display: grid;
-  gap: 16px;
-}
-
-.hero-panel,
-.workspace-main,
-.workspace-side {
-  padding: 18px;
-}
-
-.hero-head,
-.hero-actions,
-.toolbar-row,
-.inspector-actions,
-.upload-progress-shell {
-  display: flex;
-  align-items: center;
-  gap: 10px;
-  flex-wrap: wrap;
-}
-
-.hero-head {
-  justify-content: space-between;
-  margin-bottom: 12px;
-}
-
-.controls-grid {
-  margin-top: 14px;
-  display: grid;
-  gap: 10px;
-  grid-template-columns: minmax(220px, 2fr) repeat(3, minmax(140px, 1fr)) auto;
-}
-
-.search-shell {
-  min-width: 0;
-}
-
-.compact-field {
-  gap: 8px;
-}
-
-.compact-field span,
-.toggle-row,
-.side-note,
-.modal-hint {
-  color: var(--text-2);
-}
-
-.compact-field select,
-.search-shell input {
-  width: 100%;
-  border: none;
-  background: transparent;
-  color: inherit;
-  outline: none;
-}
-
-.toggle-row {
-  display: inline-flex;
-  align-items: center;
-  gap: 8px;
-  padding: 0 4px;
-}
-
-.toolbar-row {
-  margin-top: 14px;
+  gap: 14px;
 }
 
 .upload-track {
   flex: 1;
-  min-width: 180px;
-  height: 10px;
+  min-width: 120px;
+  height: 8px;
   border-radius: 999px;
   background: color-mix(in srgb, var(--surface-3) 84%, transparent);
   overflow: hidden;
@@ -988,102 +858,147 @@ onBeforeUnmount(() => {
   background: linear-gradient(90deg, var(--accent), var(--accent-warm));
 }
 
+.left-toolbar-box {
+  position: fixed;
+  left: 16px;
+  top: 88px;
+  z-index: 15;
+  width: 58px;
+  border: 1px solid var(--border-soft);
+  border-radius: 18px;
+  background: color-mix(in srgb, var(--surface-1) 93%, transparent);
+  backdrop-filter: blur(10px);
+  box-shadow: var(--shadow-lg);
+  transition: width 0.2s ease;
+}
+
+.left-toolbar-box.open {
+  width: 230px;
+}
+
+.toolbar-toggle-btn {
+  width: 100%;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  gap: 8px;
+  background: transparent;
+  border: none;
+  color: var(--text-1);
+  padding: 11px 10px;
+  cursor: pointer;
+  border-bottom: 1px solid var(--border-soft);
+}
+
+.toolbar-list {
+  display: grid;
+  gap: 8px;
+  padding: 10px;
+}
+
+.upload-progress-shell {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  color: var(--text-2);
+  font-size: 12px;
+}
+
+.hero-panel,
+.workspace-main,
+.workspace-side {
+  padding: 14px;
+}
+
+.hero-summary {
+  margin-top: 10px;
+  display: flex;
+  gap: 18px;
+  flex-wrap: wrap;
+  color: var(--text-2);
+  font-size: 13px;
+}
+
 .workspace-grid {
   display: grid;
-  gap: 16px;
-  grid-template-columns: minmax(0, 1.6fr) minmax(280px, 0.8fr);
+  gap: 14px;
+  grid-template-columns: minmax(0, 1.9fr) minmax(220px, 0.6fr);
 }
 
 .workspace-side {
-  display: grid;
-  gap: 16px;
+  height: fit-content;
+  display: flex;
+  flex-direction: column;
+  gap: 12px;
   align-content: start;
 }
 
 .side-section {
   display: grid;
-  gap: 10px;
+  gap: 8px;
 }
 
 .side-title {
-  font-size: 12px;
+  font-size: 11px;
   text-transform: uppercase;
   letter-spacing: 0.08em;
   color: var(--text-3);
 }
 
-.favorite-list,
-.folder-grid-side {
+.favorite-list {
   display: grid;
   gap: 8px;
 }
 
-.favorite-chip,
-.folder-card {
+.favorite-chip {
   border: 1px solid var(--border-soft);
   border-radius: var(--radius-sm);
   background: color-mix(in srgb, var(--surface-2) 94%, transparent);
   color: var(--text-1);
-  padding: 10px 12px;
+  padding: 9px 10px;
   text-align: left;
   cursor: pointer;
 }
 
-.favorite-chip:hover,
-.folder-card:hover {
+.favorite-chip:hover {
   border-color: color-mix(in srgb, var(--accent) 34%, var(--border-soft));
 }
 
-.inspector-card {
-  padding: 14px;
-  border-radius: var(--radius-md);
-  border: 1px solid var(--border-soft);
-  background: color-mix(in srgb, var(--surface-2) 96%, transparent);
-}
-
-.inspector-name {
-  font-weight: 800;
-  margin-bottom: 8px;
-}
-
-.inspector-meta {
+.side-note,
+.modal-hint {
   color: var(--text-2);
-  display: flex;
-  gap: 10px;
-  flex-wrap: wrap;
-  margin-bottom: 8px;
 }
 
 .floating-action-bar {
-  position: sticky;
+  position: fixed;
+  left: 50%;
+  transform: translateX(-50%);
   bottom: 18px;
   display: flex;
-  flex-wrap: wrap;
   align-items: center;
+  flex-wrap: wrap;
   gap: 8px;
-  padding: 12px;
-  margin-inline: auto;
-  width: fit-content;
-  max-width: calc(100vw - 48px);
+  max-width: calc(100vw - 40px);
+  padding: 10px;
   border: 1px solid var(--border-soft);
-  border-radius: 999px;
+  border-radius: 16px;
   background: color-mix(in srgb, var(--surface-1) 92%, transparent);
   box-shadow: var(--shadow-lg);
-  z-index: 12;
+  z-index: 25;
 }
 
 .selection-count {
   color: var(--text-2);
+  font-size: 12px;
   font-weight: 700;
-  padding-inline: 8px;
 }
 
 .snackbar {
   position: fixed;
-  right: 24px;
-  bottom: 24px;
-  padding: 12px 16px;
-  border-radius: 16px;
+  right: 16px;
+  bottom: 16px;
+  padding: 10px 12px;
+  border-radius: 12px;
   color: #fff;
   box-shadow: var(--shadow-lg);
   z-index: 30;
@@ -1118,7 +1033,7 @@ onBeforeUnmount(() => {
 }
 
 .drag-title {
-  font-size: 1.2rem;
+  font-size: 1.05rem;
   font-weight: 800;
 }
 
@@ -1137,492 +1052,70 @@ onBeforeUnmount(() => {
 }
 
 @media (max-width: 1120px) {
-  .controls-grid {
-    grid-template-columns: repeat(2, minmax(0, 1fr));
-  }
-
   .workspace-grid {
     grid-template-columns: 1fr;
+  }
+
+  .workspace-side {
+    order: -1;
   }
 }
 
 @media (max-width: 720px) {
   .file-page {
-    padding: 16px;
-  }
-
-  .controls-grid {
-    grid-template-columns: 1fr;
-  }
-
-  .floating-action-bar {
-    border-radius: 22px;
-    width: calc(100vw - 32px);
-  }
-}
-
-.checkbox-dot.checked {
-  border-color: var(--row-accent);
-  background: var(--row-accent);
-}
-
-.tag-pill {
-  margin-left: auto;
-  border: 1px solid;
-  border-radius: 999px;
-  font-size: 11px;
-  padding: 3px 8px;
-}
-
-.file-tag-dot {
-  width: 9px;
-  height: 9px;
-  border-radius: 99px;
-  margin-left: auto;
-}
-
-.mobile-card-list {
-  display: grid;
-  gap: 8px;
-  margin-top: 8px;
-}
-
-.file-mobile-card {
-  border: 1px solid var(--surface-row-border);
-  background: var(--surface-row);
-  border-radius: 14px;
-  padding: 11px;
-  text-align: left;
-  cursor: pointer;
-}
-
-.file-mobile-card.selected {
-  border-color: color-mix(in srgb, var(--accent) 45%, rgba(226, 232, 240, 0.9));
-  background: color-mix(in srgb, var(--accent) 10%, rgba(255, 255, 255, 0.62));
-}
-
-.file-main {
-  display: flex;
-  align-items: center;
-  gap: 8px;
-  min-width: 0;
-}
-
-.icon-action-btn {
-  display: inline-flex;
-  align-items: center;
-  justify-content: center;
-  width: 24px;
-  height: 24px;
-  border-radius: 8px;
-  border: 1px solid color-mix(in srgb, var(--surface-row-border) 80%, #94a3b8);
-  background: color-mix(in srgb, var(--surface-row) 90%, transparent);
-  color: var(--text-muted);
-  cursor: pointer;
-}
-
-.icon-action-btn:hover {
-  border-color: color-mix(in srgb, var(--row-accent) 45%, var(--surface-row-border));
-  color: var(--text-body);
-}
-
-.file-sub {
-  margin-top: 8px;
-  display: flex;
-  justify-content: space-between;
-  color: var(--text-muted);
-  font-size: 12px;
-  gap: 12px;
-}
-
-.floating-action-bar {
-  position: fixed;
-  left: 50%;
-  bottom: 22px;
-  transform: translateX(-50%);
-  box-sizing: border-box;
-  z-index: 25;
-  display: flex;
-  align-items: center;
-  justify-content: center;
-  flex-wrap: wrap;
-  gap: 8px;
-  width: auto;
-  max-width: calc(100vw - 34px);
-  padding: 10px;
-  border-radius: 16px;
-  border: 1px solid color-mix(in srgb, var(--accent) 32%, var(--floating-border));
-  background: var(--floating-bg);
-  backdrop-filter: blur(12px);
-  box-shadow: var(--floating-shadow);
-}
-
-.selection-count {
-  font-size: 12px;
-  color: var(--text-muted);
-  margin-right: 6px;
-}
-
-.modal-overlay {
-  position: fixed;
-  inset: 0;
-  z-index: 30;
-  background: rgba(15, 23, 42, 0.38);
-  backdrop-filter: blur(4px);
-  display: grid;
-  place-items: center;
-  padding: 16px;
-}
-
-.modal-card {
-  width: min(560px, 100%);
-  border-radius: 16px;
-  border: 1px solid var(--surface-row-border);
-  background: var(--surface-modal);
-  color: var(--text-body);
-  padding: 16px;
-}
-
-.modal-card h3 {
-  margin-top: 0;
-}
-
-.modal-hint {
-  font-size: 12px;
-  color: var(--text-muted);
-}
-
-.modal-actions {
-  display: flex;
-  justify-content: flex-end;
-  gap: 8px;
-}
-
-.image-modal {
-  padding: 10px;
-}
-
-.image-modal-card {
-  width: min(1240px, 100%);
-  height: min(92vh, 920px);
-  display: flex;
-  flex-direction: column;
-  gap: 10px;
-  border-radius: 20px;
-  border: 1px solid color-mix(in srgb, var(--accent) 28%, rgba(148, 163, 184, 0.45));
-  background: linear-gradient(140deg, rgba(7, 10, 22, 0.94), rgba(7, 14, 28, 0.9));
-  color: #e2e8f0;
-  padding: 14px;
-}
-
-.image-header,
-.image-footer {
-  display: flex;
-  align-items: center;
-  justify-content: space-between;
-  gap: 8px;
-}
-
-.image-title-wrap {
-  min-width: 0;
-  display: flex;
-  flex-direction: column;
-  gap: 4px;
-}
-
-.image-name {
-  overflow: hidden;
-  text-overflow: ellipsis;
-  white-space: nowrap;
-}
-
-.image-inline-meta {
-  display: inline-flex;
-  align-items: center;
-  gap: 10px;
-  flex-wrap: wrap;
-  font-size: 12px;
-  color: #cbd5e1;
-}
-
-.image-tools {
-  display: flex;
-  align-items: center;
-  gap: 6px;
-  flex-wrap: wrap;
-  justify-content: flex-end;
-}
-
-.image-viewer {
-  flex: 1;
-  min-height: 0;
-  display: grid;
-  place-items: center;
-  overflow: auto;
-  border-radius: 12px;
-  background: rgba(15, 23, 42, 0.86);
-}
-
-.image-viewer img {
-  display: block;
-  max-width: none;
-  max-height: none;
-  transform-origin: center;
-  transition: transform 0.2s ease;
-}
-
-.image-viewer img.fit {
-  width: 100%;
-  height: 100%;
-  object-fit: contain;
-  max-width: 100%;
-  max-height: 100%;
-}
-
-.image-footer {
-  font-size: 12px;
-  color: #cbd5e1;
-}
-
-.upload-progress-track {
-  flex: 1;
-  height: 7px;
-  border-radius: 999px;
-  background: rgba(148, 163, 184, 0.25);
-  overflow: hidden;
-}
-
-.upload-progress-value {
-  height: 100%;
-  border-radius: 999px;
-  background: linear-gradient(90deg, var(--accent), color-mix(in srgb, var(--accent) 72%, white));
-  transition: width 0.3s ease;
-}
-
-.input-shell {
-  display: inline-flex;
-  align-items: center;
-  gap: 8px;
-  border: 1px solid color-mix(in srgb, var(--surface-row-border) 82%, #94a3b8);
-  border-radius: 11px;
-  padding: 8px 10px;
-  background: var(--surface-input);
-}
-
-.input-shell input {
-  border: none;
-  background: transparent;
-  outline: none;
-  color: var(--text-body);
-  min-width: 180px;
-}
-
-.search-input {
-  flex: 1;
-  min-width: 220px;
-}
-
-.shad-btn {
-  display: inline-flex;
-  align-items: center;
-  gap: 6px;
-  border: 1px solid color-mix(in srgb, var(--surface-row-border) 78%, #94a3b8);
-  background: var(--surface-button);
-  color: var(--text-body);
-  border-radius: 11px;
-  padding: 8px 10px;
-  cursor: pointer;
-  font-size: 13px;
-  transition: transform 0.16s ease, border-color 0.16s ease;
-}
-
-.shad-btn:hover {
-  transform: translateY(-1px);
-  border-color: color-mix(in srgb, var(--accent) 40%, rgba(148, 163, 184, 0.45));
-}
-
-.shad-btn:disabled {
-  opacity: 0.6;
-  cursor: not-allowed;
-}
-
-.shad-btn-primary {
-  border-color: color-mix(in srgb, var(--accent) 58%, transparent);
-  background: color-mix(in srgb, var(--accent) 20%, #f8fafc);
-}
-
-.shad-btn-danger {
-  border-color: rgba(239, 68, 68, 0.42);
-  background: rgba(254, 242, 242, 0.92);
-  color: #991b1b;
-}
-
-.shad-btn-sm {
-  padding: 6px 8px;
-  font-size: 12px;
-}
-
-.snackbar {
-  position: fixed;
-  right: 18px;
-  bottom: 22px;
-  z-index: 40;
-  color: white;
-  border-radius: 10px;
-  padding: 8px 12px;
-}
-
-.snackbar-success {
-  background: #16a34a;
-}
-
-.snackbar-error {
-  background: #dc2626;
-}
-
-.snackbar-warning {
-  background: #d97706;
-}
-
-.snackbar-info {
-  background: #2563eb;
-}
-
-.drag-upload-overlay {
-  position: fixed;
-  inset: 0;
-  z-index: 60;
-  pointer-events: none;
-  display: flex;
-  flex-direction: column;
-  align-items: center;
-  justify-content: center;
-  gap: 6px;
-  color: #fff;
-  background: linear-gradient(145deg, rgba(30, 64, 175, 0.56), rgba(14, 165, 233, 0.44));
-  backdrop-filter: blur(6px);
-}
-
-.drag-title {
-  font-size: 20px;
-  font-weight: 600;
-}
-
-.drag-sub {
-  font-size: 13px;
-  opacity: 0.9;
-}
-
-.hidden {
-  display: none;
-}
-
-.spin {
-  animation: spin 0.8s linear infinite;
-}
-
-@keyframes spin {
-  to {
-    transform: rotate(360deg);
-  }
-}
-
-@media (max-width: 860px) {
-  .file-manager-shell {
     padding: 12px;
+    padding-bottom: 136px;
   }
 
-  .hero-card,
-  .file-list-card {
-    padding: 12px;
-  }
-
-  .hero-controls {
-    display: grid;
-    grid-template-columns: repeat(2, minmax(0, 1fr));
-    gap: 8px;
-  }
-
-  .search-input {
-    grid-column: 1 / -1;
-    min-width: 0;
-    width: 100%;
-  }
-
-  .input-shell {
-    width: 100%;
-  }
-
-  .input-shell input {
-    min-width: 0;
-    width: 100%;
-  }
-
-  .hero-controls .shad-btn {
-    width: 100%;
-    justify-content: center;
-  }
-
-  .list-header {
-    display: none;
-  }
-
-  .file-name {
-    max-width: calc(100vw - 172px);
-  }
-
-  .file-sub {
-    flex-direction: column;
-    align-items: flex-start;
-    gap: 4px;
-  }
-
-  .floating-action-bar {
-    width: calc(100vw - 20px);
-    max-width: calc(100vw - 20px);
+  .left-toolbar-box {
+    top: auto;
     left: 10px;
-    right: 10px;
-    bottom: max(10px, env(safe-area-inset-bottom));
-    transform: none;
+    right: auto;
+    bottom: 78px;
+    width: 56px;
     border-radius: 14px;
-    padding: 10px;
-    display: grid;
-    grid-template-columns: repeat(2, minmax(0, 1fr));
-    gap: 8px;
   }
 
-  .selection-count {
-    grid-column: 1 / -1;
-    margin-right: 0;
+  .left-toolbar-box.open {
+    width: min(220px, 70vw);
+  }
+
+  .toolbar-toggle-btn {
+    width: 44px;
+    min-height: 36px;
+    padding: 8px;
+    margin: 6px;
+    border-bottom: none;
+    border-radius: 10px;
+  }
+
+  .left-toolbar-box.open .toolbar-toggle-btn {
+    width: calc(100% - 12px);
+    border-bottom: 1px solid var(--border-soft);
+  }
+
+  .toolbar-list {
+    grid-template-columns: 1fr 1fr;
+  }
+
+  .toolbar-list .shad-btn {
+    width: 100%;
+  }
+
+  .floating-action-bar {
+    width: calc(100vw - 22px);
+    border-radius: 14px;
+    gap: 6px;
+    padding: 8px;
   }
 
   .floating-action-bar .shad-btn {
+    font-size: 12px;
+    padding: 7px 9px;
+  }
+
+  .selection-count {
     width: 100%;
-    min-width: 0;
-    justify-content: center;
-  }
-
-  .image-modal-card {
-    height: 92vh;
-    padding: 10px;
-  }
-
-  .image-header {
-    align-items: flex-start;
-    flex-direction: column;
-  }
-
-  .image-title-wrap {
-    width: 100%;
-  }
-
-  .image-tools {
-    width: 100%;
-    justify-content: space-between;
-  }
-
-  .image-footer {
-    display: none;
   }
 }
 </style>

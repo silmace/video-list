@@ -1,6 +1,7 @@
 <script setup lang="ts">
 import { computed, onMounted, onUnmounted, ref } from 'vue';
 import { useRouter } from 'vue-router';
+import { useDisplay } from 'vuetify';
 import { authState } from '../composables/useAuth';
 import type { TaskItem } from '../types';
 import { useLocale } from '../composables/useLocale';
@@ -12,6 +13,7 @@ const loading = ref(false);
 const snackbar = ref({ show: false, message: '', color: 'success' });
 let timer: ReturnType<typeof setInterval> | null = null;
 const { t } = useLocale();
+const { smAndDown } = useDisplay();
 
 const activeCount = computed(() =>
   tasks.value.filter((task) => task.status === 'pending' || task.status === 'running').length
@@ -156,7 +158,69 @@ onUnmounted(() => {
     </v-card>
 
     <v-card class="glass-panel pa-2">
+      <div v-if="smAndDown" class="task-mobile-list">
+        <v-card
+          v-for="item in tasks"
+          :key="item.id"
+          variant="tonal"
+          class="task-mobile-card"
+        >
+          <v-card-text>
+            <div class="mobile-row">
+              <v-chip size="small" variant="outlined">{{ taskTypeLabel(item.type) }}</v-chip>
+              <v-chip
+                size="small"
+                :color="
+                  item.status === 'success'
+                    ? 'success'
+                    : item.status === 'failed'
+                      ? 'error'
+                      : item.status === 'canceled'
+                        ? 'warning'
+                        : 'info'
+                "
+                variant="tonal"
+              >
+                {{ statusLabel(item.status) }}
+              </v-chip>
+            </div>
+            <div class="task-mobile-stage">{{ taskStageLabel(item.stage) }}</div>
+            <v-progress-linear :model-value="item.progress" height="8" rounded class="my-2" />
+            <div class="task-detail-cell">
+              <div>{{ taskDetailText(item) }}</div>
+              <div v-if="item.currentItem" class="task-detail-sub">{{ item.currentItem }}</div>
+            </div>
+            <div class="task-mobile-updated">{{ new Date(item.updatedAt).toLocaleString() }}</div>
+            <div class="mobile-row mt-2">
+              <v-btn
+                v-if="item.status === 'running' || item.status === 'pending'"
+                color="warning"
+                variant="text"
+                size="small"
+                @click="cancelTask(item.id)"
+              >
+                {{ t('cancel') }}
+              </v-btn>
+              <v-btn
+                v-if="item.outputPath"
+                color="primary"
+                variant="text"
+                size="small"
+                @click="openOutputFolder(item.outputPath)"
+              >
+                {{ t('openOutput') }}
+              </v-btn>
+            </div>
+          </v-card-text>
+        </v-card>
+
+        <div v-if="!loading && tasks.length === 0" class="task-empty">
+          {{ t('noTasksYet') }}
+        </div>
+      </div>
+
       <v-data-table
+        v-else
         :items="tasks"
         :loading="loading"
         :headers="headers"
@@ -250,5 +314,41 @@ onUnmounted(() => {
   font-size: 12px;
   color: rgba(100, 116, 139, 0.95);
   word-break: break-all;
+}
+
+.task-mobile-list {
+  display: grid;
+  gap: 10px;
+  padding: 6px;
+}
+
+.task-mobile-card {
+  border-radius: 14px;
+}
+
+.mobile-row {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 8px;
+  flex-wrap: wrap;
+}
+
+.task-mobile-stage {
+  margin-top: 8px;
+  color: rgb(var(--v-theme-primary));
+  font-size: 12px;
+}
+
+.task-mobile-updated {
+  margin-top: 8px;
+  color: rgba(100, 116, 139, 0.95);
+  font-size: 12px;
+}
+
+.task-empty {
+  padding: 16px 10px;
+  color: rgba(100, 116, 139, 0.95);
+  text-align: center;
 }
 </style>

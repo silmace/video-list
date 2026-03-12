@@ -13,6 +13,7 @@ const snackbar = ref({ show: false, message: '', color: 'success' });
 
 const baseDir = ref('');
 const videoOutputDir = ref('');
+const showHiddenItems = ref(false);
 const logDir = ref('');
 const logLevel = ref('info');
 const logRotationHours = ref(24);
@@ -64,6 +65,7 @@ const loadSettings = async () => {
     const settings = await fetchSettings();
     baseDir.value = settings.baseDir;
     videoOutputDir.value = settings.videoOutputDir;
+    showHiddenItems.value = settings.showHiddenItems;
     logDir.value = settings.logDir;
     logLevel.value = settings.logLevel;
     logRotationHours.value = settings.logRotationHours;
@@ -83,6 +85,7 @@ const saveSettings = async () => {
     await updateSettings({
       baseDir: baseDir.value,
       videoOutputDir: videoOutputDir.value,
+      showHiddenItems: showHiddenItems.value,
       logDir: logDir.value,
       logLevel: logLevel.value,
       logRotationHours: logRotationHours.value,
@@ -150,6 +153,15 @@ onMounted(async () => {
             :label="t('language')"
             variant="outlined"
             @update:model-value="onLocaleChange"
+          />
+        </v-col>
+        <v-col cols="12" md="2" class="d-flex align-center">
+          <v-switch
+            v-model="showHiddenItems"
+            color="primary"
+            :label="t('includeHiddenInList')"
+            hide-details
+            inset
           />
         </v-col>
       </v-row>

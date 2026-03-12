@@ -13,23 +13,30 @@ import {
 import { inferFileType } from '../../composables/useFileVisuals';
 import type { CustomColorTag } from '../../composables/useFileVisuals';
 import type { FileItem } from '../../types';
+import type { FileSortBy } from '../../types';
 import { useLocale } from '../../composables/useLocale';
 
 const props = defineProps<{
   files: FileItem[];
   loading: boolean;
   isMobile: boolean;
+  hasFiles: boolean;
+  allSelected: boolean;
   isSelected: (filePath: string) => boolean;
   getFileAccent: (file: FileItem) => string;
   getMatchingTag: (file: FileItem) => CustomColorTag | null;
   formatSize: (size: number) => string;
   formatDate: (value: string) => string;
+  sortBy: FileSortBy;
+  sortOrder: 'asc' | 'desc';
 }>();
 
 const emit = defineEmits<{
   open: [file: FileItem, event: MouseEvent];
   toggleSelection: [filePath: string];
+  toggleSelectAll: [];
   rename: [file: FileItem];
+  sort: [field: FileSortBy];
 }>();
 
 const { t } = useLocale();
@@ -50,9 +57,27 @@ const iconFor = (file: FileItem) => {
 <template>
   <section class="browser-pane">
     <header class="browser-head">
-      <span>{{ t('name') }}</span>
-      <span>{{ t('size') }}</span>
-      <span>{{ t('modified') }}</span>
+      <div class="name-head">
+        <input
+          type="checkbox"
+          class="header-checkbox"
+          :checked="allSelected"
+          :disabled="!hasFiles"
+          @change="emit('toggleSelectAll')"
+        >
+        <button type="button" class="sort-btn" :class="{ active: sortBy === 'name' }" @click="emit('sort', 'name')">
+          {{ t('name') }}
+          <span class="sort-arrow">{{ sortBy === 'name' ? (sortOrder === 'asc' ? '↑' : '↓') : '↕' }}</span>
+        </button>
+      </div>
+      <button type="button" class="sort-btn" :class="{ active: sortBy === 'size' }" @click="emit('sort', 'size')">
+        {{ t('size') }}
+        <span class="sort-arrow">{{ sortBy === 'size' ? (sortOrder === 'asc' ? '↑' : '↓') : '↕' }}</span>
+      </button>
+      <button type="button" class="sort-btn" :class="{ active: sortBy === 'modified' }" @click="emit('sort', 'modified')">
+        {{ t('modified') }}
+        <span class="sort-arrow">{{ sortBy === 'modified' ? (sortOrder === 'asc' ? '↑' : '↓') : '↕' }}</span>
+      </button>
     </header>
 
     <div v-if="loading" class="browser-state">{{ t('loadingFiles') }}</div>
@@ -130,10 +155,55 @@ const iconFor = (file: FileItem) => {
   display: grid;
   grid-template-columns: 1.2fr 130px 180px;
   padding: 8px 10px;
+}
+
+.name-head {
+  display: inline-flex;
+  align-items: center;
+  gap: 10px;
+}
+
+.header-checkbox {
+  width: 16px;
+  height: 16px;
+  border-radius: 5px;
+  border: 1px solid var(--border-strong);
+  display: inline-block;
+  accent-color: var(--accent);
+  margin: 0;
+}
+
+.sort-btn {
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
+  background: transparent;
+  border: none;
+  color: var(--text-3);
   font-size: 12px;
   text-transform: uppercase;
   letter-spacing: 0.08em;
-  color: var(--text-3);
+  cursor: pointer;
+  padding: 0;
+  text-align: left;
+  transition: color 0.15s ease;
+}
+
+.sort-btn:hover {
+  color: var(--text-1);
+}
+
+.sort-btn.active {
+  color: var(--accent);
+}
+
+.sort-arrow {
+  font-size: 11px;
+  opacity: 0.6;
+}
+
+.sort-btn.active .sort-arrow {
+  opacity: 1;
 }
 
 .browser-state {
@@ -251,7 +321,7 @@ const iconFor = (file: FileItem) => {
 
 @media (max-width: 860px) {
   .browser-head {
-    display: none;
+    grid-template-columns: 1fr 90px 140px;
   }
 }
 </style>

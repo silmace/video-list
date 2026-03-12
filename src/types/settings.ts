@@ -1,6 +1,7 @@
 export interface PublicSettings {
   baseDir: string;
   videoOutputDir: string;
+  showHiddenItems: boolean;
   authEnabled: boolean;
   logDir: string;
   logLevel: string;
@@ -17,6 +18,7 @@ export interface SettingsResponse {
 export interface SettingsUpdatePayload {
   baseDir: string;
   videoOutputDir: string;
+  showHiddenItems: boolean;
   logDir: string;
   logLevel: string;
   logRotationHours: number;

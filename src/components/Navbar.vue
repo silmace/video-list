@@ -1,6 +1,7 @@
 <script setup lang="ts">
 import { useRouter } from 'vue-router';
 import { onMounted } from 'vue';
+import { useDisplay } from 'vuetify';
 import { authState, checkAuthStatus, logout } from '../composables/useAuth';
 import { useLocale } from '../composables/useLocale';
 import { useThemePreference } from '../composables/useThemePreference';
@@ -8,6 +9,7 @@ import { useThemePreference } from '../composables/useThemePreference';
 const router = useRouter();
 const { t } = useLocale();
 const { isDark, toggleTheme } = useThemePreference();
+const { smAndDown } = useDisplay();
 
 const navigateHome = () => {
   router.push('/');
@@ -66,10 +68,13 @@ onMounted(async () => {
       <v-btn
         variant="tonal"
         class="pill-button"
-        :prepend-icon="isDark ? 'mdi-weather-night' : 'mdi-white-balance-sunny'"
+        :icon="smAndDown ? (isDark ? 'mdi-weather-night' : 'mdi-white-balance-sunny') : undefined"
+        :prepend-icon="smAndDown ? undefined : (isDark ? 'mdi-weather-night' : 'mdi-white-balance-sunny')"
+        :title="isDark ? t('darkModeOn') : t('lightModeOn')"
+        :aria-label="isDark ? t('darkModeOn') : t('lightModeOn')"
         @click="toggleTheme"
       >
-        {{ isDark ? t('darkModeOn') : t('lightModeOn') }}
+        <span v-if="!smAndDown">{{ isDark ? t('darkModeOn') : t('lightModeOn') }}</span>
       </v-btn>
       <v-btn
         v-if="authState.authEnabled.value && !authState.authenticated.value"
@@ -102,5 +107,16 @@ onMounted(async () => {
   font-size: 1rem;
   font-weight: 800;
   letter-spacing: -0.03em;
+}
+
+@media (max-width: 720px) {
+  .navbar-shell {
+    padding-inline: 4px;
+  }
+
+  .navbar-brand {
+    min-width: 44px;
+    padding-inline: 8px;
+  }
 }
 </style>

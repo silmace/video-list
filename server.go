@@ -52,6 +52,7 @@ const (
 type AppConfig struct {
 	BaseDir            string `json:"baseDir"`
 	VideoOutputDir     string `json:"videoOutputDir"`
+	ShowHiddenItems    bool   `json:"showHiddenItems"`
 	PasswordHash       string `json:"passwordHash,omitempty"`
 	LogDir             string `json:"logDir"`
 	LogLevel           string `json:"logLevel"`
@@ -63,6 +64,7 @@ type AppConfig struct {
 type PublicConfig struct {
 	BaseDir            string `json:"baseDir"`
 	VideoOutputDir     string `json:"videoOutputDir"`
+	ShowHiddenItems    bool   `json:"showHiddenItems"`
 	AuthEnabled        bool   `json:"authEnabled"`
 	LogDir             string `json:"logDir"`
 	LogLevel           string `json:"logLevel"`
@@ -74,6 +76,7 @@ type PublicConfig struct {
 type SettingsUpdateRequest struct {
 	BaseDir            *string `json:"baseDir"`
 	VideoOutputDir     *string `json:"videoOutputDir"`
+	ShowHiddenItems    *bool   `json:"showHiddenItems"`
 	LogDir             *string `json:"logDir"`
 	LogLevel           *string `json:"logLevel"`
 	LogRotationHours   *int    `json:"logRotationHours"`
@@ -421,6 +424,7 @@ func defaultConfig() AppConfig {
 	return AppConfig{
 		BaseDir:            baseDir,
 		VideoOutputDir:     filepath.Join(baseDir, "output"),
+		ShowHiddenItems:    false,
 		PasswordHash:       "",
 		LogDir:             logDir,
 		LogLevel:           "info",
@@ -573,6 +577,7 @@ func publicConfig(cfg AppConfig) PublicConfig {
 	return PublicConfig{
 		BaseDir:            cfg.BaseDir,
 		VideoOutputDir:     cfg.VideoOutputDir,
+		ShowHiddenItems:    cfg.ShowHiddenItems,
 		AuthEnabled:        cfg.PasswordHash != "",
 		LogDir:             cfg.LogDir,
 		LogLevel:           cfg.LogLevel,
@@ -618,6 +623,9 @@ func handleSettings(w http.ResponseWriter, r *http.Request) {
 				return
 			}
 			cfg.VideoOutputDir = resolvedOutputDir
+		}
+		if req.ShowHiddenItems != nil {
+			cfg.ShowHiddenItems = *req.ShowHiddenItems
 		}
 		if req.LogDir != nil {
 			normalizedLogDir, err := normalizePath(*req.LogDir)
@@ -1011,7 +1019,7 @@ func listFiles(w http.ResponseWriter, r *http.Request) {
 		order = "asc"
 	}
 	typeFilter := strings.TrimSpace(r.URL.Query().Get("type"))
-	includeHidden := r.URL.Query().Get("includeHidden") == "1"
+	includeHidden := getConfig().ShowHiddenItems
 
 	for _, entry := range entries {
 		if entry.Type()&os.ModeSymlink != 0 {
@@ -2110,6 +2118,12 @@ func detectAvailableVideoCodecs() []VideoCodecOption {
 		{ID: "copy", Label: "Direct Stream Copy", Description: "Fastest, keeps original codec when possible", Container: "mp4", Mode: "copy", Available: true},
 		{ID: "h264", Label: "H.264", Description: "Balanced compatibility and speed", Container: "mp4", Mode: "transcode", Available: false},
 		{ID: "h265", Label: "H.265 / HEVC", Description: "Smaller output, slower encode", Container: "mp4", Mode: "transcode", Available: false},
+		{ID: "h264_nvenc", Label: "H.264 (NVIDIA NVENC)", Description: "GPU accelerated H.264 encoding on NVIDIA GPUs", Container: "mp4", Mode: "transcode", Available: false},
+		{ID: "hevc_nvenc", Label: "H.265 (NVIDIA NVENC)", Description: "GPU accelerated HEVC encoding on NVIDIA GPUs", Container: "mp4", Mode: "transcode", Available: false},
+		{ID: "h264_qsv", Label: "H.264 (Intel Quick Sync)", Description: "GPU accelerated H.264 encoding on Intel iGPU", Container: "mp4", Mode: "transcode", Available: false},
+		{ID: "hevc_qsv", Label: "H.265 (Intel Quick Sync)", Description: "GPU accelerated HEVC encoding on Intel iGPU", Container: "mp4", Mode: "transcode", Available: false},
+		{ID: "h264_amf", Label: "H.264 (AMD AMF)", Description: "GPU accelerated H.264 encoding on AMD GPUs", Container: "mp4", Mode: "transcode", Available: false},
+		{ID: "hevc_amf", Label: "H.265 (AMD AMF)", Description: "GPU accelerated HEVC encoding on AMD GPUs", Container: "mp4", Mode: "transcode", Available: false},
 		{ID: "av1", Label: "AV1", Description: "Best compression, slowest encode", Container: "mkv", Mode: "transcode", Available: false},
 	}
 	if encoders == "" {
@@ -2121,6 +2135,18 @@ func detectAvailableVideoCodecs() []VideoCodecOption {
 			options[i].Available = strings.Contains(encoders, "libx264")
 		case "h265":
 			options[i].Available = strings.Contains(encoders, "libx265")
+		case "h264_nvenc":
+			options[i].Available = strings.Contains(encoders, "h264_nvenc")
+		case "hevc_nvenc":
+			options[i].Available = strings.Contains(encoders, "hevc_nvenc")
+		case "h264_qsv":
+			options[i].Available = strings.Contains(encoders, "h264_qsv")
+		case "hevc_qsv":
+			options[i].Available = strings.Contains(encoders, "hevc_qsv")
+		case "h264_amf":
+			options[i].Available = strings.Contains(encoders, "h264_amf")
+		case "hevc_amf":
+			options[i].Available = strings.Contains(encoders, "hevc_amf")
 		case "av1":
 			options[i].Available = strings.Contains(encoders, "libsvtav1") || strings.Contains(encoders, "librav1e") || strings.Contains(encoders, "libaom-av1")
 		}
@@ -2170,6 +2196,18 @@ func buildCodecArgs(option VideoCodecOption) []string {
 		return []string{"-c:v", "libx264", "-preset", "medium", "-crf", "23", "-c:a", "aac", "-b:a", "192k"}
 	case "h265":
 		return []string{"-c:v", "libx265", "-preset", "medium", "-crf", "28", "-c:a", "aac", "-b:a", "192k"}
+	case "h264_nvenc":
+		return []string{"-c:v", "h264_nvenc", "-preset", "p5", "-cq", "23", "-c:a", "aac", "-b:a", "192k"}
+	case "hevc_nvenc":
+		return []string{"-c:v", "hevc_nvenc", "-preset", "p5", "-cq", "28", "-c:a", "aac", "-b:a", "192k"}
+	case "h264_qsv":
+		return []string{"-c:v", "h264_qsv", "-global_quality", "23", "-c:a", "aac", "-b:a", "192k"}
+	case "hevc_qsv":
+		return []string{"-c:v", "hevc_qsv", "-global_quality", "28", "-c:a", "aac", "-b:a", "192k"}
+	case "h264_amf":
+		return []string{"-c:v", "h264_amf", "-quality", "balanced", "-c:a", "aac", "-b:a", "192k"}
+	case "hevc_amf":
+		return []string{"-c:v", "hevc_amf", "-quality", "balanced", "-c:a", "aac", "-b:a", "192k"}
 	case "av1":
 		codec := "libsvtav1"
 		encoders := readFFmpegEncoders()

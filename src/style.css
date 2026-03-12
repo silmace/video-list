@@ -114,16 +114,6 @@ a {
 	padding: 24px;
 }
 
-.section-title {
-	font-size: 1.4rem;
-	font-weight: 800;
-	letter-spacing: -0.03em;
-}
-
-.section-subtitle {
-	color: var(--text-2);
-}
-
 .pill-button {
 	border-radius: 999px !important;
 	text-transform: none !important;
@@ -252,4 +242,14 @@ a {
 .shad-btn-sm {
 	padding: 8px 10px;
 	font-size: 12px;
+}
+
+@media (max-width: 960px) {
+	.app-page {
+		padding: 14px;
+	}
+
+	.glass-panel {
+		border-radius: 16px !important;
+	}
 }

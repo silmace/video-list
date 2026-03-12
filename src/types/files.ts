@@ -16,7 +16,6 @@ export interface FileQueryOptions {
   sortBy?: FileSortBy;
   order?: FileSortOrder;
   type?: FileFilterType;
-  includeHidden?: boolean;
 }
 
 export interface FileTaskResponse {

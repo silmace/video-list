@@ -1,6 +1,7 @@
 <script setup lang="ts">
 import { computed, onMounted, onUnmounted, ref } from 'vue';
 import { useRoute, useRouter } from 'vue-router';
+import { useDisplay } from 'vuetify';
 import type { VideoCodecOption, VideoExportMode, VideoSegment } from '../types';
 import { buildMediaUrl } from '../services/api';
 import { createVideoTask as createVideoTaskRequest, fetchVideoOptions } from '../services/video';
@@ -22,6 +23,7 @@ const latestTaskId = ref('');
 const currentPlaybackTime = ref('00:00:00');
 let art: Artplayer | null = null;
 const { t } = useLocale();
+const { smAndDown } = useDisplay();
 
 const availableCodecOptions = computed(() => codecOptions.value.filter((item) => item.mode === exportMode.value));
 const segmentErrors = computed(() => segments.value.map((segment) => validateSegment(segment)));
@@ -194,19 +196,33 @@ const openTaskCenter = () => {
   router.push('/tasks');
 };
 
+const pickPreferredCodec = (mode: VideoExportMode): string => {
+  const candidates = codecOptions.value.filter((item) => item.mode === mode && item.available);
+  if (candidates.length === 0) {
+    return '';
+  }
+  if (mode === 'copy') {
+    return candidates[0].id;
+  }
+  const priority = ['h264_nvenc', 'hevc_nvenc', 'h264_qsv', 'hevc_qsv', 'h264_amf', 'hevc_amf', 'h264', 'h265', 'av1'];
+  for (const id of priority) {
+    const matched = candidates.find((item) => item.id === id);
+    if (matched) {
+      return matched.id;
+    }
+  }
+  return candidates[0].id;
+};
+
 const selectExportMode = (mode: VideoExportMode) => {
   exportMode.value = mode;
-  const preferred = availableCodecOptions.value[0];
-  selectedCodec.value = preferred?.id || '';
+  selectedCodec.value = pickPreferredCodec(mode);
 };
 
 onMounted(async () => {
   try {
     codecOptions.value = await fetchVideoOptions();
-    const preferred = codecOptions.value.find((item) => item.id === 'copy' && item.available);
-    if (preferred) {
-      selectedCodec.value = preferred.id;
-    }
+    selectedCodec.value = pickPreferredCodec(exportMode.value);
   } catch {
     codecOptions.value = [];
   }
@@ -222,7 +238,7 @@ onMounted(async () => {
     </v-card>
 
     <v-card class="glass-panel">
-      <v-card-title class="text-h5 px-4 pt-4 d-flex flex-wrap align-center ga-3">
+      <v-card-title class="px-4 pt-4 d-flex flex-wrap align-center ga-3" :class="smAndDown ? 'text-h6' : 'text-h5'">
         <span>{{ getFileName() }}</span>
         <v-chip size="small" color="secondary" variant="tonal">{{ t('currentPlaybackTime') }} {{ currentPlaybackTime }}</v-chip>
         <v-chip size="small" color="primary" variant="tonal">{{ t('totalClipDuration') }} {{ formatDuration(totalClipDuration) }}</v-chip>
@@ -233,17 +249,17 @@ onMounted(async () => {
 
         <div class="export-panel mb-6">
           <div class="text-subtitle-1 mb-2">{{ t('exportModeTitle') }}</div>
-          <div class="d-flex flex-wrap ga-2 mb-4">
-            <v-btn :variant="exportMode === 'copy' ? 'flat' : 'tonal'" class="pill-button" @click="selectExportMode('copy')">
+          <div class="d-flex flex-wrap ga-2 mb-4 mode-btn-row">
+            <v-btn :variant="exportMode === 'copy' ? 'flat' : 'tonal'" class="pill-button mode-btn" @click="selectExportMode('copy')">
               {{ t('exportMode_copy') }}
             </v-btn>
-            <v-btn :variant="exportMode === 'transcode' ? 'flat' : 'tonal'" class="pill-button" @click="selectExportMode('transcode')">
+            <v-btn :variant="exportMode === 'transcode' ? 'flat' : 'tonal'" class="pill-button mode-btn" @click="selectExportMode('transcode')">
               {{ t('exportMode_transcode') }}
             </v-btn>
           </div>
 
           <div class="text-subtitle-1 mb-2">{{ t('videoCodecTitle') }}</div>
-          <div class="d-flex flex-wrap ga-2">
+          <div class="d-flex flex-wrap ga-2 codec-chip-row">
             <v-chip
               v-for="codec in availableCodecOptions"
               :key="codec.id"
@@ -313,7 +329,7 @@ onMounted(async () => {
         </v-alert>
       </v-card-text>
 
-      <v-card-actions class="px-4 pb-4">
+      <v-card-actions class="px-4 pb-4 editor-actions">
         <v-btn color="primary" variant="outlined" prepend-icon="mdi-plus" @click="addSegment">{{ t('addSegment') }}</v-btn>
         <v-spacer />
         <v-btn color="secondary" variant="tonal" prepend-icon="mdi-progress-clock" @click="openTaskCenter">
@@ -344,5 +360,31 @@ onMounted(async () => {
   border-radius: 18px;
   border: 1px solid var(--border-soft);
   background: color-mix(in srgb, var(--surface-2) 92%, transparent);
+}
+
+@media (max-width: 960px) {
+  .mode-btn-row,
+  .codec-chip-row {
+    display: grid;
+    grid-template-columns: 1fr;
+  }
+
+  .mode-btn {
+    width: 100%;
+  }
+
+  .editor-actions {
+    display: grid;
+    grid-template-columns: 1fr;
+    gap: 8px;
+  }
+
+  .editor-actions :deep(.v-spacer) {
+    display: none;
+  }
+
+  .editor-actions .v-btn {
+    width: 100%;
+  }
 }
 </style>
