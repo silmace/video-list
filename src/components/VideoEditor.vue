@@ -1,5 +1,5 @@
 <script setup lang="ts">
-import { computed, onMounted, onUnmounted, ref } from 'vue';
+import { computed, onMounted, onUnmounted, ref, watch } from 'vue';
 import { useRoute, useRouter } from 'vue-router';
 import { useDisplay } from 'vuetify';
 import type { VideoCodecOption, VideoExportMode, VideoSegment } from '../types';
@@ -8,6 +8,15 @@ import { createVideoTask as createVideoTaskRequest, fetchVideoOptions } from '..
 import Artplayer from 'artplayer';
 import PathBreadcrumb from './PathBreadcrumb.vue';
 import { useLocale } from '../composables/useLocale';
+
+type ArtplayerInstance = {
+  currentTime: number;
+  url: string;
+  destroy: (removeHtml?: boolean) => void;
+  on: (event: string, handler: (...args: unknown[]) => void) => unknown;
+};
+
+type ArtplayerConstructor = new (option: Record<string, unknown>) => ArtplayerInstance;
 
 const route = useRoute();
 const router = useRouter();
@@ -21,7 +30,9 @@ const loading = ref(false);
 const snackbar = ref({ show: false, message: '', color: '' });
 const latestTaskId = ref('');
 const currentPlaybackTime = ref('00:00:00');
-let art: Artplayer | null = null;
+const artFailed = ref(false);
+const fallbackVideoRef = ref<HTMLVideoElement | null>(null);
+let art: ArtplayerInstance | null = null;
 const { t } = useLocale();
 const { smAndDown } = useDisplay();
 
@@ -29,16 +40,70 @@ const availableCodecOptions = computed(() => codecOptions.value.filter((item) =>
 const segmentErrors = computed(() => segments.value.map((segment) => validateSegment(segment)));
 const hasInvalidSegments = computed(() => segmentErrors.value.some(Boolean));
 const hasValidCodecSelection = computed(() => availableCodecOptions.value.some((item) => item.id === selectedCodec.value));
+const breadcrumbPath = computed(() => {
+  if (!videoPath.value) {
+    return '/';
+  }
+  const segments = videoPath.value.split('/').filter(Boolean);
+  if (segments.length <= 1) {
+    return '/';
+  }
+  return `/${segments.slice(0, -1).join('/')}`;
+});
 const totalClipDuration = computed(() => {
   return segments.value.reduce((sum, segment) => sum + Math.max(0, parseTime(segment.endTime) - parseTime(segment.startTime)), 0);
 });
 
 const getVideoPath = () => {
   if (!route.params.pathMatch) return '';
-  const path = Array.isArray(route.params.pathMatch)
-    ? route.params.pathMatch.join('/')
-    : route.params.pathMatch;
-  return `/${path}`;
+  const rawSegments = Array.isArray(route.params.pathMatch)
+    ? route.params.pathMatch
+    : [route.params.pathMatch];
+
+  const decodedSegments = rawSegments
+    .map((segment) => {
+      const value = String(segment || '').trim();
+      if (!value) {
+        return '';
+      }
+      try {
+        return decodeURIComponent(value);
+      } catch {
+        return value;
+      }
+    })
+    .filter(Boolean);
+
+  const normalizedSegments = decodedSegments
+    .map((segment) => segment.replace(/^\/+|\/+$/g, ''))
+    .filter(Boolean);
+
+  if (normalizedSegments.length === 0) {
+    return '';
+  }
+
+  return `/${normalizedSegments.join('/')}`;
+};
+
+const resolveArtplayerConstructor = (): ArtplayerConstructor | null => {
+  const moduleValue = Artplayer as unknown as { default?: unknown };
+  const candidate = typeof moduleValue === 'function' ? moduleValue : moduleValue.default;
+  return typeof candidate === 'function' ? (candidate as ArtplayerConstructor) : null;
+};
+
+const mountNativeFallbackPlayer = (url: string) => {
+  if (!artRef.value) {
+    return;
+  }
+  artRef.value.innerHTML = '';
+  const video = document.createElement('video');
+  video.className = 'native-video-fallback';
+  video.controls = true;
+  video.preload = 'metadata';
+  video.src = url;
+  video.playsInline = true;
+  fallbackVideoRef.value = video;
+  artRef.value.appendChild(video);
 };
 
 const showSnackbar = (message: string, color: string) => {
@@ -58,10 +123,24 @@ onMounted(() => {
     return;
   }
 
-  if (artRef.value) {
-    art = new Artplayer({
+  if (!artRef.value) {
+    return;
+  }
+
+  artFailed.value = false;
+  const mediaUrl = buildMediaUrl(videoPath.value);
+  const ArtplayerCtor = resolveArtplayerConstructor();
+  if (!ArtplayerCtor) {
+    artFailed.value = true;
+    showSnackbar(t('videoPlaybackError'), 'error');
+    mountNativeFallbackPlayer(mediaUrl);
+    return;
+  }
+
+  try {
+    art = new ArtplayerCtor({
       container: artRef.value,
-      url: buildMediaUrl(videoPath.value),
+      url: mediaUrl,
       volume: 0.5,
       autoplay: false,
       pip: true,
@@ -74,25 +153,55 @@ onMounted(() => {
       fullscreenWeb: true,
       subtitleOffset: true,
       miniProgressBar: true,
-      mutex: true,
-      backdrop: true,
       playsInline: true,
       autoSize: true,
-      autoMini: true,
-      autoOrientation: true,
       theme: '#0f766e',
     });
-    art.on('video:timeupdate', () => {
-      currentPlaybackTime.value = formatTime(art?.currentTime || 0);
-    });
+  } catch {
+    artFailed.value = true;
+    showSnackbar(t('videoPlaybackError'), 'error');
+    mountNativeFallbackPlayer(mediaUrl);
+    return;
   }
+
+  fallbackVideoRef.value = null;
+  art.on('video:timeupdate', () => {
+    currentPlaybackTime.value = formatTime(art?.currentTime || 0);
+  });
+  art.on('video:error', () => {
+    artFailed.value = true;
+    showSnackbar(t('videoPlaybackError'), 'error');
+  });
+  art.on('error', () => {
+    artFailed.value = true;
+    showSnackbar(t('videoPlaybackError'), 'error');
+  });
 });
+
+watch(
+  () => route.params.pathMatch,
+  () => {
+    const nextVideoPath = getVideoPath();
+    if (!nextVideoPath) {
+      return;
+    }
+    videoPath.value = nextVideoPath;
+    currentPlaybackTime.value = '00:00:00';
+    artFailed.value = false;
+    if (art) {
+      art.url = buildMediaUrl(nextVideoPath);
+    } else if (fallbackVideoRef.value) {
+      fallbackVideoRef.value.src = buildMediaUrl(nextVideoPath);
+    }
+  }
+);
 
 onUnmounted(() => {
   if (art) {
     art.destroy();
     art = null;
   }
+  fallbackVideoRef.value = null;
 });
 
 const addSegment = () => {
@@ -189,6 +298,9 @@ const createVideoTask = async () => {
 const getFileName = () => videoPath.value?.split('/').pop() || t('videoEditorFallback');
 
 const handlePathNavigation = (path: string) => {
+  if (!path || path === route.path) {
+    return;
+  }
   router.push(path);
 };
 
@@ -233,7 +345,7 @@ onMounted(async () => {
   <v-container class="app-page">
     <v-card class="glass-panel mb-4">
       <v-card-text>
-        <PathBreadcrumb :path="videoPath" :onNavigate="handlePathNavigation" />
+        <PathBreadcrumb :path="breadcrumbPath" @navigate="handlePathNavigation" />
       </v-card-text>
     </v-card>
 
@@ -245,6 +357,9 @@ onMounted(async () => {
       </v-card-title>
 
       <v-card-text>
+        <v-alert v-if="artFailed" type="warning" variant="tonal" class="mb-4">
+          {{ t('videoPlaybackError') }}
+        </v-alert>
         <div ref="artRef" class="video-player mb-6" />
 
         <div class="export-panel mb-6">
@@ -353,6 +468,17 @@ onMounted(async () => {
   background-color: black;
   border-radius: 12px;
   overflow: hidden;
+}
+
+.video-player :deep(.art-video-player) {
+  z-index: 1;
+}
+
+.video-player .native-video-fallback {
+  width: 100%;
+  height: 100%;
+  display: block;
+  background-color: black;
 }
 
 .export-panel {

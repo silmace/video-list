@@ -286,8 +286,11 @@ async function openFile(file: FileItem) {
     return;
   }
   if (isVideo(file.name)) {
-    const videoPath = file.path.startsWith('/') ? file.path.slice(1) : file.path;
-    await router.push(`/edit/${videoPath}`);
+    const pathMatch = file.path.split('/').filter(Boolean);
+    await router.push({
+      name: 'video-editor',
+      params: { pathMatch },
+    });
     return;
   }
   if (isImage(file.name)) {
@@ -648,8 +651,8 @@ onBeforeUnmount(() => {
     @drop.prevent="onDropShell"
   >
     <aside class="left-toolbar-box" :class="{ open: toolbarExpanded }">
-      <button
-        type="button"
+      <v-btn
+        variant="text"
         class="toolbar-toggle-btn"
         :aria-label="toolbarExpanded ? t('collapseToolbar') : t('expandToolbar')"
         @click="toolbarExpanded = !toolbarExpanded"
@@ -658,25 +661,33 @@ onBeforeUnmount(() => {
         <span v-if="toolbarExpanded">{{ t('toolbar') }}</span>
         <ChevronLeft v-if="toolbarExpanded" :size="14" />
         <ChevronRight v-else :size="14" />
-      </button>
+      </v-btn>
 
       <div v-if="toolbarExpanded" class="toolbar-list">
-        <button type="button" class="shad-btn" :disabled="loading" @click="fetchFiles(currentPath, false)">
-          <RefreshCw :size="16" :class="{ spin: loading }" />
+        <v-btn variant="tonal" class="toolbar-btn" :disabled="loading" @click="fetchFiles(currentPath, false)">
+          <template #prepend>
+            <RefreshCw :size="16" :class="{ spin: loading }" />
+          </template>
           {{ t('refresh') }}
-        </button>
-        <button type="button" class="shad-btn" @click="showCreateFolderDialog = true">
-          <FolderPlus :size="16" />
+        </v-btn>
+        <v-btn variant="tonal" class="toolbar-btn" @click="showCreateFolderDialog = true">
+          <template #prepend>
+            <FolderPlus :size="16" />
+          </template>
           {{ t('newFolder') }}
-        </button>
-        <button type="button" class="shad-btn shad-btn-primary" :disabled="uploading" @click="openUploadDialog">
-          <Upload :size="16" />
+        </v-btn>
+        <v-btn variant="tonal" color="primary" class="toolbar-btn" :disabled="uploading" @click="openUploadDialog">
+          <template #prepend>
+            <Upload :size="16" />
+          </template>
           {{ uploading ? t('uploadingNow') : t('upload') }}
-        </button>
-        <button type="button" class="shad-btn" @click="toggleFavorite(currentPath)">
-          <Star :size="16" />
+        </v-btn>
+        <v-btn variant="tonal" class="toolbar-btn" @click="toggleFavorite(currentPath)">
+          <template #prepend>
+            <Star :size="16" />
+          </template>
           {{ favorites.includes(currentPath) ? t('favoriteSaved') : t('addFavorite') }}
-        </button>
+        </v-btn>
 
         <div v-if="uploading" class="upload-progress-shell">
           <div class="upload-track">
@@ -922,22 +933,33 @@ onBeforeUnmount(() => {
 
 .toolbar-toggle-btn {
   width: 100%;
+  min-height: 44px;
+  color: var(--text-1);
+  border-radius: 0;
+  border-bottom: 1px solid var(--border-soft);
+}
+
+.toolbar-toggle-btn :deep(.v-btn__content) {
   display: inline-flex;
   align-items: center;
   justify-content: center;
   gap: 8px;
-  background: transparent;
-  border: none;
-  color: var(--text-1);
-  padding: 11px 10px;
-  cursor: pointer;
-  border-bottom: 1px solid var(--border-soft);
 }
 
 .toolbar-list {
   display: grid;
   gap: 8px;
   padding: 10px;
+}
+
+.toolbar-btn {
+  justify-content: flex-start;
+  text-transform: none;
+  letter-spacing: 0;
+}
+
+.toolbar-btn :deep(.v-btn__content) {
+  justify-content: flex-start;
 }
 
 .upload-progress-shell {
@@ -1141,10 +1163,9 @@ onBeforeUnmount(() => {
   .toolbar-toggle-btn {
     width: 44px;
     min-height: 36px;
-    padding: 8px;
     margin: 6px;
     border-bottom: none;
-    border-radius: 10px;
+    border-radius: 10px !important;
   }
 
   .left-toolbar-box.open .toolbar-toggle-btn {
@@ -1156,7 +1177,7 @@ onBeforeUnmount(() => {
     grid-template-columns: 1fr;
   }
 
-  .toolbar-list .shad-btn {
+  .toolbar-list :deep(.v-btn) {
     width: 100%;
   }
 

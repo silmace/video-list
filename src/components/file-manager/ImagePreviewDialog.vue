@@ -29,11 +29,15 @@ const { t } = useLocale();
 </script>
 
 <template>
-  <div v-if="open && file" class="modal-overlay image-modal" @click.self="emit('close')">
-    <div class="image-modal-card">
+  <v-dialog
+    :model-value="open && !!file"
+    max-width="1220"
+    @update:model-value="(value) => { if (!value) emit('close') }"
+  >
+    <v-card v-if="file" class="image-modal-card">
       <header class="image-header">
         <div>
-          <div class="image-name">{{ file.name }}</div>
+          <div class="image-name" :title="file.name">{{ file.name }}</div>
           <div class="image-meta">
             <span>{{ index + 1 }} / {{ total }}</span>
             <span>{{ formatSize(file.size) }}</span>
@@ -41,13 +45,13 @@ const { t } = useLocale();
           </div>
         </div>
         <div class="image-tools">
-          <button type="button" class="shad-btn shad-btn-sm" @click="emit('previous')"><ArrowLeft :size="14" /></button>
-          <button type="button" class="shad-btn shad-btn-sm" @click="emit('next')"><ArrowRight :size="14" /></button>
-          <button type="button" class="shad-btn shad-btn-sm" @click="emit('zoomOut')"><ZoomOut :size="14" /></button>
-          <button type="button" class="shad-btn shad-btn-sm" @click="emit('zoomIn')"><ZoomIn :size="14" /></button>
-          <button type="button" class="shad-btn shad-btn-sm" @click="emit('toggleFit')">{{ fitToScreen ? t('originalSize') : t('fitWindow') }}</button>
-          <button type="button" class="shad-btn shad-btn-sm" @click="emit('download')"><Download :size="14" /></button>
-          <button type="button" class="shad-btn shad-btn-sm" @click="emit('close')"><X :size="14" /></button>
+          <v-btn size="small" variant="tonal" icon @click="emit('previous')"><ArrowLeft :size="14" /></v-btn>
+          <v-btn size="small" variant="tonal" icon @click="emit('next')"><ArrowRight :size="14" /></v-btn>
+          <v-btn size="small" variant="tonal" icon @click="emit('zoomOut')"><ZoomOut :size="14" /></v-btn>
+          <v-btn size="small" variant="tonal" icon @click="emit('zoomIn')"><ZoomIn :size="14" /></v-btn>
+          <v-btn size="small" variant="tonal" @click="emit('toggleFit')">{{ fitToScreen ? t('originalSize') : t('fitWindow') }}</v-btn>
+          <v-btn size="small" variant="tonal" icon @click="emit('download')"><Download :size="14" /></v-btn>
+          <v-btn size="small" variant="tonal" color="error" icon @click="emit('close')"><X :size="14" /></v-btn>
         </div>
       </header>
 
@@ -59,8 +63,8 @@ const { t } = useLocale();
           :style="{ transform: fitToScreen ? 'none' : `scale(${previewScale})` }"
         >
       </div>
-    </div>
-  </div>
+    </v-card>
+  </v-dialog>
 </template>
 
 <style scoped>
@@ -93,6 +97,10 @@ const { t } = useLocale();
 .image-name {
   font-size: 1.05rem;
   font-weight: 800;
+  max-width: min(560px, 70vw);
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
 }
 
 .image-meta {
@@ -118,5 +126,10 @@ const { t } = useLocale();
 .image-viewer img.fit {
   max-width: 100%;
   max-height: 72vh;
+}
+
+.image-tools :deep(.v-btn) {
+  text-transform: none;
+  letter-spacing: 0;
 }
 </style>

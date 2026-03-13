@@ -8,6 +8,10 @@ const props = defineProps<{
   onNavigate?: (path: string) => void;
 }>();
 
+const emit = defineEmits<{
+  (event: 'navigate', path: string): void;
+}>();
+
 const router = useRouter();
 const { t } = useLocale();
 
@@ -23,6 +27,7 @@ const pathSegments = computed(() => {
 });
 
 const handleClick = (path: string) => {
+  emit('navigate', path);
   if (props.onNavigate) {
     props.onNavigate(path);
   } else {
@@ -53,7 +58,7 @@ const handleClick = (path: string) => {
 }
 
 .crumb-label {
-  font-size: 12px;
+  font-size: 14px;
   letter-spacing: 0.08em;
   text-transform: uppercase;
   color: color-mix(in srgb, var(--accent, #3b82f6) 45%, #64748b);
@@ -61,6 +66,7 @@ const handleClick = (path: string) => {
 
 .crumb-btn {
   max-width: min(320px, 42vw);
+  font-size: 14px;
   border: none;
   border-radius: 10px;
   padding: 4px 8px;

@@ -25,6 +25,7 @@ const router = createRouter({
     },
     {
       path: '/edit/:pathMatch(.*)*',
+      name: 'video-editor',
       component: VideoEditor,
       props: true
     },
