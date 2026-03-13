@@ -1,17 +1,4 @@
-export interface FileItem {
-  name: string;
-  path: string;
-  isDirectory: boolean;
-  size: number;
-  modifiedTime: string;
-}
-
-export interface VideoSegment {
-  startTime: string;
-  endTime: string;
-}
-
-export interface VideoEditPayload {
-  videoPath: string;
-  segments: VideoSegment[];
-}
+export * from './files';
+export * from './settings';
+export * from './tasks';
+export * from './video';

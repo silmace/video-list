@@ -1,57 +1,65 @@
 # Video List
 
-This is a simple Go server for provide file list, media streaming, and video editing functionalities using FFmpeg.
+Video List is a file manager with media streaming and video editing task support.
+This project is designed to be easily deployed on remote devices such as NAS servers. It allows you to conveniently edit and manage video files stored remotely.
 
 ## Dependencies
 
-- Go 
-- FFmpeg (for video processing)
-- Node.js and npm (for Vite)
+- Go
+- Node.js and npm
+- FFmpeg (required for video editing)
 
 ## Build
 
-    
-    git https://github.com/silmace/video-list.git
-    cd video-edit-server
-    npm install
-    npm vite build
-    go mod tidy
-    go build -o video-list ./server.go
-    
-## Usage
+```bash
+git clone https://github.com/silmace/video-list.git
+cd video-list
+npm install
+npm run build
+go build -o video-list .
+```
 
-    
-    ./video-list -baseDir /path/to/your/base/directory
-baseDir: The base directory to serve files from. Default is '/www'
+## Run
 
-## Installation
-    
-    curl -L -o linux-amd64 https://github.com/silmace/video-list/releases/download/beta/linux-amd64
-    chmod +x linux-amd64
-    mv linux-amd64 /usr/bin/video-list
-    apt install ffmpeg -y
+```bash
+./video-list
+```
 
-    cat <<EOF > /etc/systemd/system/video-list.service
-    [Unit]
-    Description=video-list
-    After=network.target
+Optional flags:
 
-    [Service]
-    Type=simple
-    ExecStart=/usr/bin/video-list -baseDir /mnt  # set your baseDir
-    PIDFile=/var/run/video-list.pid
-    StandardOutput=file:/var/run/myapp-server.log
-    StandardError=file:/var/run/myapp-server.log
+- `-baseDir`: override base directory at startup
+- `-config`: set custom config file path (YAML)
 
-    [Install]
-    WantedBy=multi-user.target
-    EOF
+Example:
 
-    systemctl daemon-reload
+```bash
+./video-list -baseDir /data/media -config ./config/config.yaml
+```
 
-    systemctl enable video-list
+## Config File
 
-    systemctl start video-list
+- Default config path:
+  - Windows: `%APPDATA%/video-list/config.yaml`
+  - Linux/macOS: `~/.video-list/config.yaml`
+- If the config file is missing or empty, it is created automatically on startup.
+
+## GitHub Actions (Auto Build)
+
+This repository includes CI workflow:
+
+- `.github/workflows/ci-build.yml`
+
+Trigger rules:
+
+- `push`
+- `pull_request`
+
+CI steps:
+
+1. Install Node dependencies
+2. Build frontend (`npm run build`)
+3. Compile backend (`go build .`)
 
 ## License
-This project is licensed under the MIT License.
+
+MIT
