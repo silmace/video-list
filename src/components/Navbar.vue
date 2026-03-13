@@ -93,12 +93,12 @@ onMounted(async () => {
           variant="tonal"
           class="pill-button theme-toggle-btn"
           :size="smAndDown ? 'small' : 'default'"
-          :icon="smAndDown ? (isDark ? 'mdi-weather-night' : 'mdi-white-balance-sunny') : undefined"
-          :prepend-icon="smAndDown ? undefined : (isDark ? 'mdi-weather-night' : 'mdi-white-balance-sunny')"
+          :icon="smAndDown"
           :title="isDark ? t('darkModeOn') : t('lightModeOn')"
           :aria-label="isDark ? t('darkModeOn') : t('lightModeOn')"
           @click="toggleTheme"
         >
+          <v-icon :start="!smAndDown">{{ isDark ? 'mdi-weather-night' : 'mdi-white-balance-sunny' }}</v-icon>
           <span v-if="!smAndDown">{{ isDark ? t('darkModeOn') : t('lightModeOn') }}</span>
         </v-btn>
         <v-btn
