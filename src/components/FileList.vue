@@ -98,6 +98,15 @@ const accentColor = computed(() => {
 });
 const transferTitle = computed(() => (transferMode.value === 'copy' ? t('copySelection') : t('moveSelection')));
 
+function shortenPathLabel(value: string, maxLength = 42) {
+  if (value.length <= maxLength) {
+    return value;
+  }
+  const headLength = Math.max(8, Math.floor((maxLength - 3) / 2));
+  const tailLength = Math.max(8, maxLength - 3 - headLength);
+  return `${value.slice(0, headLength)}...${value.slice(-tailLength)}`;
+}
+
 function loadFavorites(): string[] {
   try {
     const parsed = JSON.parse(localStorage.getItem(FAVORITES_STORAGE_KEY) || '[]') as string[];
@@ -629,7 +638,8 @@ onBeforeUnmount(() => {
 </script>
 
 <template>
-  <div
+  <v-container
+    fluid
     class="file-page"
     :style="{ '--accent': accentColor }"
     @dragenter.prevent="onDragEnterShell"
@@ -717,9 +727,10 @@ onBeforeUnmount(() => {
               :key="favorite"
               type="button"
               class="favorite-chip"
+              :title="favorite"
               @click="fetchFiles(favorite, true)"
             >
-              {{ favorite }}
+              {{ shortenPathLabel(favorite) }}
             </button>
             <div v-if="favorites.length === 0" class="side-note">{{ t('favoritesEmpty') }}</div>
           </div>
@@ -731,23 +742,35 @@ onBeforeUnmount(() => {
 
     <div v-if="hasSelection" class="floating-action-bar">
       <span class="selection-count">{{ t('selectedCount', { count: selectedCount }) }}</span>
-      <button type="button" class="shad-btn shad-btn-danger" @click="showDeleteDialog = true">
-        <Trash2 :size="14" />
+      <v-btn size="small" color="error" variant="tonal" class="action-btn" @click="showDeleteDialog = true">
+        <template #prepend>
+          <Trash2 :size="14" />
+        </template>
         {{ t('delete') }}
-      </button>
-      <button type="button" class="shad-btn" @click="openTransfer('move')">
-        <MoveRight :size="14" />
+      </v-btn>
+      <v-btn size="small" variant="tonal" class="action-btn" @click="openTransfer('move')">
+        <template #prepend>
+          <MoveRight :size="14" />
+        </template>
         {{ t('move') }}
-      </button>
-      <button type="button" class="shad-btn" @click="openTransfer('copy')">
-        <Copy :size="14" />
+      </v-btn>
+      <v-btn size="small" variant="tonal" class="action-btn" @click="openTransfer('copy')">
+        <template #prepend>
+          <Copy :size="14" />
+        </template>
         {{ t('copy') }}
-      </button>
-      <button type="button" class="shad-btn" @click="downloadSelected">{{ t('download') }}</button>
-      <button type="button" class="shad-btn" :disabled="selectedCount !== 1" @click="selectedSingleItem && openRenameDialog(selectedSingleItem)">
+      </v-btn>
+      <v-btn size="small" variant="tonal" class="action-btn" @click="downloadSelected">{{ t('download') }}</v-btn>
+      <v-btn
+        size="small"
+        variant="tonal"
+        class="action-btn"
+        :disabled="selectedCount !== 1"
+        @click="selectedSingleItem && openRenameDialog(selectedSingleItem)"
+      >
         {{ t('rename') }}
-      </button>
-      <button type="button" class="shad-btn" @click="clearSelection">{{ t('clear') }}</button>
+      </v-btn>
+      <v-btn size="small" variant="tonal" class="action-btn" @click="clearSelection">{{ t('clear') }}</v-btn>
     </div>
 
     <DestinationPickerDialog
@@ -763,46 +786,62 @@ onBeforeUnmount(() => {
       @confirm="submitTransfer"
     />
 
-    <div v-if="showCreateFolderDialog" class="modal-overlay" @click.self="showCreateFolderDialog = false">
-      <div class="modal-card">
-        <h3>{{ t('newFolder') }}</h3>
-        <label class="input-shell">
-          <input v-model="newFolderName" type="text" :placeholder="t('folderName')" @keyup.enter="createFolderAction">
-        </label>
-        <p class="modal-hint">{{ t('folderNameHint') }}</p>
-        <div class="modal-actions">
-          <button type="button" class="shad-btn" @click="showCreateFolderDialog = false">{{ t('cancel') }}</button>
-          <button type="button" class="shad-btn shad-btn-primary" @click="createFolderAction">{{ t('create') }}</button>
-        </div>
-      </div>
-    </div>
+    <v-dialog v-model="showCreateFolderDialog" max-width="480">
+      <v-card>
+        <v-card-title>{{ t('newFolder') }}</v-card-title>
+        <v-card-text>
+          <v-text-field
+            v-model="newFolderName"
+            :label="t('folderName')"
+            variant="outlined"
+            density="comfortable"
+            hide-details="auto"
+            @keyup.enter="createFolderAction"
+          />
+          <p class="modal-hint">{{ t('folderNameHint') }}</p>
+        </v-card-text>
+        <v-card-actions class="justify-end">
+          <v-btn variant="text" @click="showCreateFolderDialog = false">{{ t('cancel') }}</v-btn>
+          <v-btn color="primary" variant="tonal" @click="createFolderAction">{{ t('create') }}</v-btn>
+        </v-card-actions>
+      </v-card>
+    </v-dialog>
 
-    <div v-if="showRenameDialog" class="modal-overlay" @click.self="showRenameDialog = false">
-      <div class="modal-card">
-        <h3>{{ t('rename') }}</h3>
-        <label class="input-shell">
-          <input v-model="renameName" type="text" :placeholder="t('newName')" @keyup.enter="renameFileAction">
-        </label>
-        <p class="modal-hint">{{ t('renameHint') }}</p>
-        <div class="modal-actions">
-          <button type="button" class="shad-btn" @click="showRenameDialog = false">{{ t('cancel') }}</button>
-          <button type="button" class="shad-btn shad-btn-primary" :disabled="submittingRename" @click="renameFileAction">
+    <v-dialog v-model="showRenameDialog" max-width="480">
+      <v-card>
+        <v-card-title>{{ t('rename') }}</v-card-title>
+        <v-card-text>
+          <v-text-field
+            v-model="renameName"
+            :label="t('newName')"
+            variant="outlined"
+            density="comfortable"
+            hide-details="auto"
+            @keyup.enter="renameFileAction"
+          />
+          <p class="modal-hint">{{ t('renameHint') }}</p>
+        </v-card-text>
+        <v-card-actions class="justify-end">
+          <v-btn variant="text" @click="showRenameDialog = false">{{ t('cancel') }}</v-btn>
+          <v-btn color="primary" variant="tonal" :loading="submittingRename" :disabled="submittingRename" @click="renameFileAction">
             {{ t('rename') }}
-          </button>
-        </div>
-      </div>
-    </div>
+          </v-btn>
+        </v-card-actions>
+      </v-card>
+    </v-dialog>
 
-    <div v-if="showDeleteDialog" class="modal-overlay" @click.self="showDeleteDialog = false">
-      <div class="modal-card">
-        <h3>{{ t('deleteSelectionTitle') }}</h3>
-        <p class="modal-hint">{{ t('deleteSelectionHint', { count: selectedCount }) }}</p>
-        <div class="modal-actions">
-          <button type="button" class="shad-btn" @click="showDeleteDialog = false">{{ t('cancel') }}</button>
-          <button type="button" class="shad-btn shad-btn-danger" @click="createDeleteTask">{{ t('confirmDelete') }}</button>
-        </div>
-      </div>
-    </div>
+    <v-dialog v-model="showDeleteDialog" max-width="460">
+      <v-card>
+        <v-card-title>{{ t('deleteSelectionTitle') }}</v-card-title>
+        <v-card-text>
+          <p class="modal-hint">{{ t('deleteSelectionHint', { count: selectedCount }) }}</p>
+        </v-card-text>
+        <v-card-actions class="justify-end">
+          <v-btn variant="text" @click="showDeleteDialog = false">{{ t('cancel') }}</v-btn>
+          <v-btn color="error" variant="tonal" @click="createDeleteTask">{{ t('confirmDelete') }}</v-btn>
+        </v-card-actions>
+      </v-card>
+    </v-dialog>
 
     <ImagePreviewDialog
       :open="showImageDialog"
@@ -832,16 +871,21 @@ onBeforeUnmount(() => {
       <div class="drag-title">{{ t('dragUploadOverlay') }}</div>
       <div class="drag-sub">{{ t('dragUploadSub') }}</div>
     </div>
-  </div>
+  </v-container>
 </template>
 
 <style scoped>
 .file-page {
   position: relative;
+  width: 100%;
+  min-width: 0;
+  max-width: 1680px;
+  margin-inline: auto;
   padding: 20px;
   padding-left: 86px;
   display: grid;
   gap: 14px;
+  overflow-x: clip;
 }
 
 .upload-track {
@@ -908,6 +952,7 @@ onBeforeUnmount(() => {
 .workspace-main,
 .workspace-side {
   padding: 14px;
+  min-width: 0;
 }
 
 .hero-summary {
@@ -923,6 +968,7 @@ onBeforeUnmount(() => {
   display: grid;
   gap: 14px;
   grid-template-columns: minmax(0, 1.9fr) minmax(220px, 0.6fr);
+  min-width: 0;
 }
 
 .workspace-side {
@@ -951,12 +997,17 @@ onBeforeUnmount(() => {
 }
 
 .favorite-chip {
+  display: block;
+  width: 100%;
   border: 1px solid var(--border-soft);
   border-radius: var(--radius-sm);
   background: color-mix(in srgb, var(--surface-2) 94%, transparent);
   color: var(--text-1);
   padding: 9px 10px;
   text-align: left;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
   cursor: pointer;
 }
 
@@ -971,20 +1022,25 @@ onBeforeUnmount(() => {
 
 .floating-action-bar {
   position: fixed;
-  left: 50%;
-  transform: translateX(-50%);
+  left: 20px;
+  right: 20px;
+  justify-content: center;
   bottom: 18px;
   display: flex;
   align-items: center;
   flex-wrap: wrap;
   gap: 8px;
-  max-width: calc(100vw - 40px);
   padding: 10px;
   border: 1px solid var(--border-soft);
   border-radius: 16px;
   background: color-mix(in srgb, var(--surface-1) 92%, transparent);
   box-shadow: var(--shadow-lg);
   z-index: 25;
+}
+
+.floating-action-bar :deep(.v-btn) {
+  text-transform: none;
+  letter-spacing: 0;
 }
 
 .selection-count {
@@ -1064,6 +1120,8 @@ onBeforeUnmount(() => {
 @media (max-width: 720px) {
   .file-page {
     padding: 12px;
+    padding-inline: 12px;
+    padding-left: 12px;
     padding-bottom: 136px;
   }
 
@@ -1095,7 +1153,7 @@ onBeforeUnmount(() => {
   }
 
   .toolbar-list {
-    grid-template-columns: 1fr 1fr;
+    grid-template-columns: 1fr;
   }
 
   .toolbar-list .shad-btn {
@@ -1103,15 +1161,16 @@ onBeforeUnmount(() => {
   }
 
   .floating-action-bar {
-    width: calc(100vw - 22px);
+    left: 10px;
+    right: 10px;
     border-radius: 14px;
     gap: 6px;
     padding: 8px;
   }
 
-  .floating-action-bar .shad-btn {
+  .floating-action-bar :deep(.v-btn) {
+    min-height: 32px;
     font-size: 12px;
-    padding: 7px 9px;
   }
 
   .selection-count {

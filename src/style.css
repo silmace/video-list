@@ -28,6 +28,12 @@
 	--radius-sm: 12px;
 }
 
+*,
+*::before,
+*::after {
+	box-sizing: border-box;
+}
+
 body[data-theme='dark'] {
 	color-scheme: dark;
 	--bg-base: #16120f;
@@ -54,6 +60,8 @@ body[data-theme='dark'] {
 
 html {
 	background: var(--bg-base);
+	max-width: 100%;
+	overflow-x: hidden;
 }
 
 body {
@@ -66,6 +74,8 @@ body {
 		radial-gradient(circle at 12% 82%, rgba(255, 236, 207, 0.24), transparent 22%),
 		linear-gradient(145deg, var(--bg-base), var(--bg-elevated) 52%, var(--bg-accent));
 	min-height: 100vh;
+	max-width: 100%;
+	overflow-x: hidden;
 }
 
 code,
@@ -86,6 +96,8 @@ a {
 
 #app {
 	min-height: 100vh;
+	max-width: 100%;
+	overflow-x: hidden;
 }
 
 .app-shell {

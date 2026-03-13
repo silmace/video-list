@@ -1,8 +1,7 @@
-package main
+package app
 
 import (
 	"context"
-	"encoding/json"
 	"errors"
 	"fmt"
 	"net/http"
@@ -24,7 +23,7 @@ func handleEditVideo(w http.ResponseWriter, r *http.Request) {
 	}
 
 	var req VideoEditRequest
-	if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
+	if err := decodeJSONBody(w, r, &req); err != nil {
 		writeError(w, http.StatusBadRequest, "invalid request payload")
 		return
 	}
@@ -62,7 +61,7 @@ func handleCreateVideoTask(w http.ResponseWriter, r *http.Request) {
 	}
 
 	var req VideoEditRequest
-	if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
+	if err := decodeJSONBody(w, r, &req); err != nil {
 		writeError(w, http.StatusBadRequest, "invalid request payload")
 		return
 	}

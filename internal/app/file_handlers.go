@@ -1,7 +1,6 @@
-package main
+package app
 
 import (
-	"encoding/json"
 	"io"
 	"mime"
 	"net/http"
@@ -29,7 +28,7 @@ func handleCreateFolder(w http.ResponseWriter, r *http.Request) {
 	}
 
 	var req CreateFolderRequest
-	if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
+	if err := decodeJSONBody(w, r, &req); err != nil {
 		writeError(w, http.StatusBadRequest, "invalid request payload")
 		return
 	}
@@ -158,7 +157,7 @@ func handleRenameFile(w http.ResponseWriter, r *http.Request) {
 	}
 
 	var req RenameFileRequest
-	if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
+	if err := decodeJSONBody(w, r, &req); err != nil {
 		writeError(w, http.StatusBadRequest, "invalid request payload")
 		return
 	}
@@ -349,6 +348,11 @@ func deleteFile(w http.ResponseWriter, r *http.Request) {
 }
 
 func handleMediaStream(w http.ResponseWriter, r *http.Request) {
+	if r.Method != http.MethodGet {
+		writeError(w, http.StatusMethodNotAllowed, "method not allowed")
+		return
+	}
+
 	relPath := r.URL.Query().Get("path")
 	absPath, err := toAbsolutePath(relPath)
 	if err != nil {

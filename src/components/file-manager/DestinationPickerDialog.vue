@@ -23,45 +23,53 @@ const { t } = useLocale();
 </script>
 
 <template>
-  <div v-if="open" class="modal-overlay" @click.self="emit('close')">
-    <div class="modal-card browse-dialog">
-      <div class="dialog-head">
-        <div>
-          <h3>{{ title }}</h3>
-          <p>{{ t('destinationHint') }}</p>
+  <v-dialog
+    :model-value="open"
+    max-width="720"
+    @update:model-value="(value) => { if (!value) emit('close') }"
+  >
+    <v-card class="browse-dialog">
+      <v-card-title class="pb-1">{{ title }}</v-card-title>
+      <v-card-text>
+        <p class="dialog-note mb-3">{{ t('destinationHint') }}</p>
+
+        <PathBreadcrumb :path="path" :on-navigate="(nextPath) => emit('browse', nextPath)" />
+
+        <v-text-field
+          class="mt-3"
+          :model-value="path"
+          :label="t('destinationPath')"
+          variant="outlined"
+          density="comfortable"
+          hide-details="auto"
+          @update:model-value="(value) => emit('updatePath', String(value ?? ''))"
+        />
+
+        <div class="folder-grid">
+          <v-btn size="small" variant="outlined" class="folder-chip" @click="emit('browse', '/')">{{ t('home') }}</v-btn>
+          <v-btn
+            v-for="folder in folders"
+            :key="folder.path"
+            size="small"
+            variant="outlined"
+            class="folder-chip"
+            @click="emit('browse', folder.path)"
+          >
+            {{ folder.name }}
+          </v-btn>
         </div>
-      </div>
 
-      <PathBreadcrumb :path="path" :on-navigate="(nextPath) => emit('browse', nextPath)" />
-
-      <label class="input-shell">
-        <input :value="path" type="text" :placeholder="t('destinationPath')" @input="emit('updatePath', ($event.target as HTMLInputElement).value)">
-      </label>
-
-      <div class="folder-grid">
-        <button type="button" class="folder-chip" @click="emit('browse', '/')">{{ t('home') }}</button>
-        <button
-          v-for="folder in folders"
-          :key="folder.path"
-          type="button"
-          class="folder-chip"
-          @click="emit('browse', folder.path)"
-        >
-          {{ folder.name }}
-        </button>
-      </div>
-
-      <div v-if="busy" class="dialog-note">{{ t('loadingFiles') }}</div>
-      <div v-else-if="folders.length === 0" class="dialog-note">{{ t('noFoldersHere') }}</div>
-
-      <div class="modal-actions">
-        <button type="button" class="shad-btn" @click="emit('close')">{{ t('cancel') }}</button>
-        <button type="button" class="shad-btn shad-btn-primary" :disabled="submitting" @click="emit('confirm')">
+        <div v-if="busy" class="dialog-note mt-2">{{ t('loadingFiles') }}</div>
+        <div v-else-if="folders.length === 0" class="dialog-note mt-2">{{ t('noFoldersHere') }}</div>
+      </v-card-text>
+      <v-card-actions class="justify-end">
+        <v-btn variant="text" @click="emit('close')">{{ t('cancel') }}</v-btn>
+        <v-btn color="primary" variant="tonal" :loading="submitting" :disabled="submitting" @click="emit('confirm')">
           {{ t('createTask') }}
-        </button>
-      </div>
-    </div>
-  </div>
+        </v-btn>
+      </v-card-actions>
+    </v-card>
+  </v-dialog>
 </template>
 
 <style scoped>
@@ -69,7 +77,6 @@ const { t } = useLocale();
   width: min(720px, 92vw);
 }
 
-.dialog-head p,
 .dialog-note {
   color: var(--text-2);
 }
@@ -82,11 +89,7 @@ const { t } = useLocale();
 }
 
 .folder-chip {
-  border: 1px solid var(--border-soft);
-  background: color-mix(in srgb, var(--surface-2) 94%, transparent);
-  color: var(--text-1);
-  border-radius: 999px;
-  padding: 8px 12px;
-  cursor: pointer;
+  text-transform: none;
+  letter-spacing: 0;
 }
 </style>

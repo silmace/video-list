@@ -1,8 +1,7 @@
-package main
+package app
 
 import (
 	"context"
-	"encoding/json"
 	"errors"
 	"fmt"
 	"io"
@@ -19,7 +18,7 @@ func handleCreateBatchDeleteTask(w http.ResponseWriter, r *http.Request) {
 	}
 
 	var req BatchDeleteRequest
-	if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
+	if err := decodeJSONBody(w, r, &req); err != nil {
 		writeError(w, http.StatusBadRequest, "invalid request payload")
 		return
 	}
@@ -98,7 +97,7 @@ func handleCreateBatchMoveTask(w http.ResponseWriter, r *http.Request) {
 	}
 
 	var req BatchMoveRequest
-	if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
+	if err := decodeJSONBody(w, r, &req); err != nil {
 		writeError(w, http.StatusBadRequest, "invalid request payload")
 		return
 	}
@@ -192,7 +191,7 @@ func handleCreateBatchCopyTask(w http.ResponseWriter, r *http.Request) {
 	}
 
 	var req BatchCopyRequest
-	if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
+	if err := decodeJSONBody(w, r, &req); err != nil {
 		writeError(w, http.StatusBadRequest, "invalid request payload")
 		return
 	}

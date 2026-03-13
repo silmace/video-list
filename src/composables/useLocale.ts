@@ -213,7 +213,7 @@ const messages: Record<AppLocale, MessageMap> = {
     status_canceled: '已取消'
   },
   'en-US': {
-    appTitle: 'Video File System',
+    appTitle: 'Video List',
     home: 'Home',
     path: 'Path',
     files: 'Files',

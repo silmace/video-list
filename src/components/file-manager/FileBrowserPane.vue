@@ -52,6 +52,21 @@ const iconFor = (file: FileItem) => {
   if (type === 'code') return FileCode;
   return File;
 };
+
+const truncateFileName = (name: string, maxLength = 56) => {
+  if (name.length <= maxLength) {
+    return name;
+  }
+
+  const extensionIndex = name.lastIndexOf('.');
+  if (extensionIndex <= 0) {
+    return `${name.slice(0, maxLength - 3)}...`;
+  }
+
+  const extension = name.slice(extensionIndex);
+  const baseLength = Math.max(8, maxLength - extension.length - 3);
+  return `${name.slice(0, baseLength)}...${extension}`;
+};
 </script>
 
 <template>
@@ -97,14 +112,14 @@ const iconFor = (file: FileItem) => {
             <span class="checkbox-dot" :class="{ checked: isSelected(file.path) }" />
           </button>
           <component :is="iconFor(file)" :size="18" />
-          <span class="file-name">{{ file.name }}</span>
+          <span class="file-name" :title="file.name">{{ truncateFileName(file.name, 40) }}</span>
           <button type="button" class="icon-action-btn" @click.stop="emit('rename', file)">
             <PencilLine :size="14" />
           </button>
         </div>
         <div class="row-meta">
-          <span>{{ file.isDirectory ? '-' : formatSize(file.size) }}</span>
-          <span>{{ formatDate(file.modifiedTime) }}</span>
+          <span class="meta-item" :title="file.isDirectory ? '-' : formatSize(file.size)">{{ file.isDirectory ? '-' : formatSize(file.size) }}</span>
+          <span class="meta-item" :title="formatDate(file.modifiedTime)">{{ formatDate(file.modifiedTime) }}</span>
         </div>
       </article>
     </div>
@@ -125,7 +140,7 @@ const iconFor = (file: FileItem) => {
                 <span class="checkbox-dot" :class="{ checked: isSelected(file.path) }" />
               </button>
               <component :is="iconFor(file)" :size="18" />
-              <span class="file-name">{{ file.name }}</span>
+              <span class="file-name" :title="file.name">{{ truncateFileName(file.name) }}</span>
               <button type="button" class="icon-action-btn" @click.stop="emit('rename', file)">
                 <PencilLine :size="14" />
               </button>
@@ -137,8 +152,8 @@ const iconFor = (file: FileItem) => {
                 {{ getMatchingTag(file)?.label }}
               </span>
             </td>
-            <td>{{ file.isDirectory ? '-' : formatSize(file.size) }}</td>
-            <td>{{ formatDate(file.modifiedTime) }}</td>
+            <td class="size-cell" :title="file.isDirectory ? '-' : formatSize(file.size)">{{ file.isDirectory ? '-' : formatSize(file.size) }}</td>
+            <td class="modified-cell" :title="formatDate(file.modifiedTime)">{{ formatDate(file.modifiedTime) }}</td>
           </tr>
         </tbody>
       </table>
@@ -149,11 +164,12 @@ const iconFor = (file: FileItem) => {
 <style scoped>
 .browser-pane {
   min-height: 420px;
+  min-width: 0;
 }
 
 .browser-head {
   display: grid;
-  grid-template-columns: 1.2fr 130px 180px;
+  grid-template-columns: minmax(0, 1fr) 108px 164px;
   padding: 8px 10px;
 }
 
@@ -161,6 +177,7 @@ const iconFor = (file: FileItem) => {
   display: inline-flex;
   align-items: center;
   gap: 10px;
+  min-width: 0;
 }
 
 .header-checkbox {
@@ -212,11 +229,14 @@ const iconFor = (file: FileItem) => {
 }
 
 .table-wrap {
-  overflow: auto;
+  overflow-x: auto;
+  overflow-y: hidden;
 }
 
 .file-table {
   width: 100%;
+  min-width: 760px;
+  table-layout: fixed;
   border-collapse: separate;
   border-spacing: 0 10px;
 }
@@ -230,6 +250,9 @@ const iconFor = (file: FileItem) => {
   background: color-mix(in srgb, var(--surface-2) 94%, transparent);
   border-top: 1px solid var(--border-soft);
   border-bottom: 1px solid var(--border-soft);
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
 }
 
 .file-row td:first-child {
@@ -253,12 +276,23 @@ const iconFor = (file: FileItem) => {
   display: flex;
   align-items: center;
   gap: 10px;
+  min-width: 0;
 }
 
 .file-name {
+  flex: 1 1 auto;
+  min-width: 0;
   overflow: hidden;
   text-overflow: ellipsis;
   white-space: nowrap;
+}
+
+.size-cell {
+  width: 108px;
+}
+
+.modified-cell {
+  width: 164px;
 }
 
 .mobile-cards {
@@ -271,6 +305,8 @@ const iconFor = (file: FileItem) => {
   border-radius: var(--radius-md);
   border: 1px solid var(--border-soft);
   background: color-mix(in srgb, var(--surface-2) 96%, transparent);
+  min-width: 0;
+  overflow: hidden;
 }
 
 .mobile-card.selected {
@@ -280,11 +316,27 @@ const iconFor = (file: FileItem) => {
 
 .row-meta {
   margin-top: 10px;
-  display: flex;
-  justify-content: space-between;
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) minmax(0, 1fr);
   gap: 10px;
   font-size: 12px;
   color: var(--text-2);
+  min-width: 0;
+}
+
+.meta-item {
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.row-main {
+  width: 100%;
+}
+
+.meta-item:last-child {
+  text-align: right;
 }
 
 .checkbox-hit,
@@ -312,6 +364,7 @@ const iconFor = (file: FileItem) => {
 }
 
 .tag-pill {
+  flex: 0 0 auto;
   border: 1px solid currentColor;
   border-radius: 999px;
   padding: 2px 8px;
@@ -319,9 +372,17 @@ const iconFor = (file: FileItem) => {
   font-weight: 700;
 }
 
-@media (max-width: 860px) {
+@media (max-width: 1200px) {
   .browser-head {
-    grid-template-columns: 1fr 90px 140px;
+    grid-template-columns: minmax(0, 1fr) 90px 140px;
+  }
+
+  .size-cell {
+    width: 90px;
+  }
+
+  .modified-cell {
+    width: 140px;
   }
 }
 </style>

@@ -1,7 +1,10 @@
-package main
+package app
 
 import (
 	"encoding/json"
+	"errors"
+	"fmt"
+	"io"
 
 	"net/http"
 	"os"
@@ -11,6 +14,7 @@ import (
 
 	"github.com/sirupsen/logrus"
 	"golang.org/x/crypto/bcrypt"
+	"gopkg.in/yaml.v3"
 )
 
 func defaultConfig() AppConfig {
@@ -54,30 +58,34 @@ func resolveConfigPath(override string) string {
 	if runtime.GOOS == "windows" {
 		appData := os.Getenv("APPDATA")
 		if appData != "" {
-			return filepath.Join(appData, "video-list", "config.json")
+			return filepath.Join(appData, "video-list", "config.yaml")
 		}
 	}
 
 	home, err := os.UserHomeDir()
 	if err != nil {
-		return filepath.Join(".", "video-list-config.json")
+		return filepath.Join(".", "video-list-config.yaml")
 	}
 
 	if runtime.GOOS == "windows" {
-		return filepath.Join(home, "AppData", "Roaming", "video-list", "config.json")
+		return filepath.Join(home, "AppData", "Roaming", "video-list", "config.yaml")
 	}
-	return filepath.Join(home, ".video-list", "config.json")
+	return filepath.Join(home, ".video-list", "config.yaml")
 }
 
 func loadOrInitConfig(path string, baseDirOverride string) (AppConfig, error) {
 	cfg := defaultConfig()
 
-	if err := os.MkdirAll(filepath.Dir(path), 0755); err != nil {
+	if err := os.MkdirAll(filepath.Dir(path), 0700); err != nil {
 		return cfg, err
 	}
 
 	if content, err := os.ReadFile(path); err == nil {
-		_ = json.Unmarshal(content, &cfg)
+		if strings.TrimSpace(string(content)) != "" {
+			if err := yaml.Unmarshal(content, &cfg); err != nil {
+				return cfg, fmt.Errorf("invalid YAML config: %w", err)
+			}
+		}
 	}
 
 	if baseDirOverride != "" {
@@ -128,12 +136,12 @@ func loadOrInitConfig(path string, baseDirOverride string) (AppConfig, error) {
 }
 
 func saveConfig(path string, cfg AppConfig) error {
-	content, err := json.MarshalIndent(cfg, "", "  ")
+	content, err := yaml.Marshal(cfg)
 	if err != nil {
 		return err
 	}
 	tempPath := path + ".tmp"
-	if err := os.WriteFile(tempPath, content, 0644); err != nil {
+	if err := os.WriteFile(tempPath, content, 0600); err != nil {
 		return err
 	}
 	return os.Rename(tempPath, path)
@@ -168,6 +176,20 @@ func writeError(w http.ResponseWriter, status int, message string) {
 	})
 }
 
+func decodeJSONBody(w http.ResponseWriter, r *http.Request, dst any) error {
+	r.Body = http.MaxBytesReader(w, r.Body, maxJSONBodyBytes)
+	decoder := json.NewDecoder(r.Body)
+	decoder.DisallowUnknownFields()
+	if err := decoder.Decode(dst); err != nil {
+		return err
+	}
+	var trailing any
+	if err := decoder.Decode(&trailing); !errors.Is(err, io.EOF) {
+		return errors.New("invalid request payload")
+	}
+	return nil
+}
+
 func publicConfig(cfg AppConfig) PublicConfig {
 	return PublicConfig{
 		BaseDir:            cfg.BaseDir,
@@ -189,7 +211,7 @@ func handleSettings(w http.ResponseWriter, r *http.Request) {
 		writeJSON(w, http.StatusOK, map[string]any{"success": true, "settings": publicConfig(cfg)})
 	case http.MethodPut:
 		var req SettingsUpdateRequest
-		if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
+		if err := decodeJSONBody(w, r, &req); err != nil {
 			writeError(w, http.StatusBadRequest, "invalid request payload")
 			return
 		}

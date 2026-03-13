@@ -1,11 +1,12 @@
-package main
+package app
 
 import (
 	"context"
-	"github.com/sirupsen/logrus"
 	"net/http"
 	"strings"
 	"time"
+
+	"github.com/sirupsen/logrus"
 )
 
 func requestIDFromContext(ctx context.Context) string {
@@ -44,5 +45,14 @@ func loggingMiddleware(next http.Handler) http.Handler {
 			"duration_ms": durationMs,
 			"remote_addr": r.RemoteAddr,
 		}).Info("request completed")
+	})
+}
+
+func securityHeadersMiddleware(next http.Handler) http.Handler {
+	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		w.Header().Set("X-Content-Type-Options", "nosniff")
+		w.Header().Set("X-Frame-Options", "DENY")
+		w.Header().Set("Referrer-Policy", "same-origin")
+		next.ServeHTTP(w, r)
 	})
 }

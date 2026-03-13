@@ -49,6 +49,7 @@ const handleClick = (path: string) => {
   align-items: center;
   flex-wrap: wrap;
   gap: 8px;
+  min-width: 0;
 }
 
 .crumb-label {
@@ -59,11 +60,15 @@ const handleClick = (path: string) => {
 }
 
 .crumb-btn {
+  max-width: min(320px, 42vw);
   border: none;
   border-radius: 10px;
   padding: 4px 8px;
   background: transparent;
   color: inherit;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
   cursor: pointer;
   transition: background 0.2s ease;
 }
@@ -74,5 +79,11 @@ const handleClick = (path: string) => {
 
 .crumb-sep {
   color: #94a3b8;
+}
+
+@media (max-width: 720px) {
+  .crumb-btn {
+    max-width: min(180px, 52vw);
+  }
 }
 </style>

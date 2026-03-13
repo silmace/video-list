@@ -1,4 +1,4 @@
-package main
+package app
 
 import (
 	"context"
@@ -13,6 +13,7 @@ type contextKey string
 const (
 	requestIDKey       contextKey = "request_id"
 	tokenTTL                      = 24 * time.Hour
+	maxJSONBodyBytes   int64      = 1 << 20
 	maxUploadSizeBytes int64      = 1024 << 20
 	maxTaskRuntime                = 4 * time.Hour
 	maxConcurrentTasks            = 2
@@ -27,15 +28,15 @@ const (
 )
 
 type AppConfig struct {
-	BaseDir            string `json:"baseDir"`
-	VideoOutputDir     string `json:"videoOutputDir"`
-	ShowHiddenItems    bool   `json:"showHiddenItems"`
-	PasswordHash       string `json:"passwordHash,omitempty"`
-	LogDir             string `json:"logDir"`
-	LogLevel           string `json:"logLevel"`
-	LogRotationHours   int    `json:"logRotationHours"`
-	LogMaxAgeDays      int    `json:"logMaxAgeDays"`
-	TaskPollIntervalMs int    `json:"taskPollIntervalMs"`
+	BaseDir            string `json:"baseDir" yaml:"baseDir"`
+	VideoOutputDir     string `json:"videoOutputDir" yaml:"videoOutputDir"`
+	ShowHiddenItems    bool   `json:"showHiddenItems" yaml:"showHiddenItems"`
+	PasswordHash       string `json:"passwordHash,omitempty" yaml:"passwordHash,omitempty"`
+	LogDir             string `json:"logDir" yaml:"logDir"`
+	LogLevel           string `json:"logLevel" yaml:"logLevel"`
+	LogRotationHours   int    `json:"logRotationHours" yaml:"logRotationHours"`
+	LogMaxAgeDays      int    `json:"logMaxAgeDays" yaml:"logMaxAgeDays"`
+	TaskPollIntervalMs int    `json:"taskPollIntervalMs" yaml:"taskPollIntervalMs"`
 }
 
 type PublicConfig struct {
