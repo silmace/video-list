@@ -3,10 +3,21 @@
 Video List is a file manager with media streaming and video editing task support.
 This project is designed to be easily deployed on remote devices such as NAS servers. It allows you to conveniently edit and manage video files stored remotely.
 
+Current UI stack:
+
+- Vue 3 + Tailwind CSS + shadcn-vue style components
+- Artplayer for playback
+
+Current backend layout:
+
+- `main.go`: thin bootstrap entrypoint
+- `internal/backend`: app logic, handlers, auth, tasks, media processing
+- `internal/routes`: route registration and static SPA serving
+
 ## Dependencies
 
 - Go
-- Node.js and npm
+- Node.js 20.19+ (or 22.12+) and npm
 - FFmpeg (required for video editing)
 
 ## Build
@@ -25,22 +36,33 @@ go build -o video-list .
 ./video-list
 ```
 
+Windows:
+
+```powershell
+.\video-list.exe
+```
+
 Optional flags:
 
 - `-baseDir`: override base directory at startup
-- `-config`: set custom config file path (YAML)
+- `-config`: set custom config file path (JSON)
+- `-port`: set HTTP server port (default `3001`)
+
+Optional environment variable:
+
+- `VIDEO_LIST_PORT`: set HTTP server port when no `-port` flag is provided
 
 Example:
 
 ```bash
-./video-list -baseDir /data/media -config ./config/config.yaml
+./video-list -baseDir /data/media -config ./config/config.json -port 3002
 ```
 
 ## Config File
 
 - Default config path:
-  - Windows: `%APPDATA%/video-list/config.yaml`
-  - Linux/macOS: `~/.video-list/config.yaml`
+  - Windows: `%APPDATA%/video-list/config.json`
+  - Linux/macOS: `~/.video-list/config.json`
 - If the config file is missing or empty, it is created automatically on startup.
 
 ## GitHub Actions (Auto Build)

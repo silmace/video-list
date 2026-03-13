@@ -2,6 +2,7 @@
 import { ArrowLeft, ArrowRight, Download, X, ZoomIn, ZoomOut } from 'lucide-vue-next';
 import type { FileItem } from '../../types';
 import { useLocale } from '../../composables/useLocale';
+import { Button } from '@/components/ui/button';
 
 defineProps<{
   open: boolean;
@@ -41,13 +42,13 @@ const { t } = useLocale();
           </div>
         </div>
         <div class="image-tools">
-          <button type="button" class="shad-btn shad-btn-sm" @click="emit('previous')"><ArrowLeft :size="14" /></button>
-          <button type="button" class="shad-btn shad-btn-sm" @click="emit('next')"><ArrowRight :size="14" /></button>
-          <button type="button" class="shad-btn shad-btn-sm" @click="emit('zoomOut')"><ZoomOut :size="14" /></button>
-          <button type="button" class="shad-btn shad-btn-sm" @click="emit('zoomIn')"><ZoomIn :size="14" /></button>
-          <button type="button" class="shad-btn shad-btn-sm" @click="emit('toggleFit')">{{ fitToScreen ? t('originalSize') : t('fitWindow') }}</button>
-          <button type="button" class="shad-btn shad-btn-sm" @click="emit('download')"><Download :size="14" /></button>
-          <button type="button" class="shad-btn shad-btn-sm" @click="emit('close')"><X :size="14" /></button>
+          <Button variant="outline" size="sm" class="tool-btn" @click="emit('previous')"><ArrowLeft :size="14" /></Button>
+          <Button variant="outline" size="sm" class="tool-btn" @click="emit('next')"><ArrowRight :size="14" /></Button>
+          <Button variant="outline" size="sm" class="tool-btn" @click="emit('zoomOut')"><ZoomOut :size="14" /></Button>
+          <Button variant="outline" size="sm" class="tool-btn" @click="emit('zoomIn')"><ZoomIn :size="14" /></Button>
+          <Button variant="outline" size="sm" class="tool-btn" @click="emit('toggleFit')">{{ fitToScreen ? t('originalSize') : t('fitWindow') }}</Button>
+          <Button variant="outline" size="sm" class="tool-btn" @click="emit('download')"><Download :size="14" /></Button>
+          <Button variant="outline" size="sm" class="tool-btn" @click="emit('close')"><X :size="14" /></Button>
         </div>
       </header>
 
@@ -98,6 +99,10 @@ const { t } = useLocale();
 .image-meta {
   color: var(--text-2);
   font-size: 12px;
+}
+
+.tool-btn {
+  border-radius: 999px;
 }
 
 .image-viewer {

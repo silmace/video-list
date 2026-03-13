@@ -3,20 +3,26 @@
   "private": true,
   "version": "0.0.0",
   "type": "module",
+  "engines": {
+    "node": ">=20.19.0"
+  },
   "scripts": {
     "dev": "npm run dev:web",
     "dev:web": "vite",
-    "dev:api": "go run .",
+    "dev:api": "go build -o video-list.exe . \" ./video_list.exe\"",
     "dev:full": "concurrently \"npm run dev:web\" \"npm run dev:api\"",
     "build": "vue-tsc -b && vite build",
+    "test": "npm run test:unit && npm run test:go",
+    "test:unit": "vitest run --coverage",
+    "test:go": "go test ./...",
     "preview": "vite preview",
     "start": "vite preview"
   },
   "dependencies": {
-    "@mdi/font": "^7.4.47",
     "@vueuse/core": "^10.7.2",
     "artplayer": "^5.1.1",
     "axios": "^1.6.7",
+    "class-variance-authority": "^0.7.1",
     "clsx": "^2.1.1",
     "cors": "^2.8.5",
     "express": "^4.18.2",
@@ -24,19 +30,26 @@
     "lucide-vue-next": "^0.577.0",
     "motion-v": "^2.0.0",
     "multer": "1.4.5-lts.1",
+    "tailwind-merge": "^3.5.0",
     "vue": "^3.3.4",
-    "vue-router": "^4.2.5",
-    "vuetify": "^3.5.4"
+    "vue-router": "^4.2.5"
   },
   "devDependencies": {
+    "@tailwindcss/postcss": "^4.2.1",
     "@types/cors": "^2.8.17",
     "@types/express": "^4.17.21",
     "@types/fluent-ffmpeg": "^2.1.24",
-    "@vitejs/plugin-vue": "^5.2.4",
+    "@vitejs/plugin-vue": "^6.0.0",
+    "autoprefixer": "^10.4.27",
     "concurrently": "^8.2.2",
+    "postcss": "^8.5.8",
     "sass": "^1.71.1",
+    "tailwindcss": "^4.2.1",
+    "tailwindcss-animate": "^1.0.7",
+    "vitest": "^3.2.4",
+    "@vitest/coverage-v8": "^3.2.4",
     "typescript": "^5.2.2",
-    "vite": "^5.4.19",
+    "vite": "^8.0.0",
     "vue-tsc": "^3.2.5"
   }
 }

@@ -15,6 +15,7 @@ import type { CustomColorTag } from '../../composables/useFileVisuals';
 import type { FileItem } from '../../types';
 import type { FileSortBy } from '../../types';
 import { useLocale } from '../../composables/useLocale';
+import { Button } from '@/components/ui/button';
 
 const props = defineProps<{
   files: FileItem[];
@@ -65,19 +66,34 @@ const iconFor = (file: FileItem) => {
           :disabled="!hasFiles"
           @change="emit('toggleSelectAll')"
         >
-        <button type="button" class="sort-btn" :class="{ active: sortBy === 'name' }" @click="emit('sort', 'name')">
+        <Button
+          variant="ghost"
+          size="sm"
+          :class="sortBy === 'name' ? 'sort-btn active' : 'sort-btn'"
+          @click="emit('sort', 'name')"
+        >
           {{ t('name') }}
           <span class="sort-arrow">{{ sortBy === 'name' ? (sortOrder === 'asc' ? '↑' : '↓') : '↕' }}</span>
-        </button>
+        </Button>
       </div>
-      <button type="button" class="sort-btn" :class="{ active: sortBy === 'size' }" @click="emit('sort', 'size')">
+      <Button
+        variant="ghost"
+        size="sm"
+        :class="sortBy === 'size' ? 'sort-btn active' : 'sort-btn'"
+        @click="emit('sort', 'size')"
+      >
         {{ t('size') }}
         <span class="sort-arrow">{{ sortBy === 'size' ? (sortOrder === 'asc' ? '↑' : '↓') : '↕' }}</span>
-      </button>
-      <button type="button" class="sort-btn" :class="{ active: sortBy === 'modified' }" @click="emit('sort', 'modified')">
+      </Button>
+      <Button
+        variant="ghost"
+        size="sm"
+        :class="sortBy === 'modified' ? 'sort-btn active' : 'sort-btn'"
+        @click="emit('sort', 'modified')"
+      >
         {{ t('modified') }}
         <span class="sort-arrow">{{ sortBy === 'modified' ? (sortOrder === 'asc' ? '↑' : '↓') : '↕' }}</span>
-      </button>
+      </Button>
     </header>
 
     <div v-if="loading" class="browser-state">{{ t('loadingFiles') }}</div>
@@ -98,9 +114,9 @@ const iconFor = (file: FileItem) => {
           </button>
           <component :is="iconFor(file)" :size="18" />
           <span class="file-name">{{ file.name }}</span>
-          <button type="button" class="icon-action-btn" @click.stop="emit('rename', file)">
+          <Button variant="ghost" size="icon" class="icon-action-btn" @click.stop="emit('rename', file)">
             <PencilLine :size="14" />
-          </button>
+          </Button>
         </div>
         <div class="row-meta">
           <span>{{ file.isDirectory ? '-' : formatSize(file.size) }}</span>
@@ -126,9 +142,9 @@ const iconFor = (file: FileItem) => {
               </button>
               <component :is="iconFor(file)" :size="18" />
               <span class="file-name">{{ file.name }}</span>
-              <button type="button" class="icon-action-btn" @click.stop="emit('rename', file)">
+              <Button variant="ghost" size="icon" class="icon-action-btn" @click.stop="emit('rename', file)">
                 <PencilLine :size="14" />
-              </button>
+              </Button>
               <span
                 v-if="getMatchingTag(file)"
                 class="tag-pill"
@@ -174,17 +190,15 @@ const iconFor = (file: FileItem) => {
 }
 
 .sort-btn {
-  display: inline-flex;
-  align-items: center;
+  justify-content: flex-start;
   gap: 4px;
-  background: transparent;
-  border: none;
   color: var(--text-3);
   font-size: 12px;
   text-transform: uppercase;
   letter-spacing: 0.08em;
-  cursor: pointer;
-  padding: 0;
+  font-weight: 700;
+  min-height: 28px;
+  padding: 0 4px;
   text-align: left;
   transition: color 0.15s ease;
 }
@@ -292,10 +306,12 @@ const iconFor = (file: FileItem) => {
   display: inline-flex;
   align-items: center;
   justify-content: center;
-  border: none;
-  background: transparent;
   color: inherit;
-  cursor: pointer;
+}
+
+.icon-action-btn {
+  width: 28px;
+  height: 28px;
 }
 
 .checkbox-dot {

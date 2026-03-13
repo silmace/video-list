@@ -6,14 +6,34 @@ useThemePreference()
 </script>
 
 <template>
-  <v-app class="app-shell">
+  <div class="app-shell">
     <Navbar />
-    <v-main class="app-main">
+    <main class="app-main">
       <router-view v-slot="{ Component }">
-        <v-fade-transition mode="out-in">
+        <Transition name="page-fade" mode="out-in">
           <component :is="Component" />
-        </v-fade-transition>
+        </Transition>
       </router-view>
-    </v-main>
-  </v-app>
+    </main>
+  </div>
 </template>
+
+<style scoped>
+.app-shell {
+  min-height: 100vh;
+}
+
+.app-main {
+  background: transparent;
+}
+
+.page-fade-enter-active,
+.page-fade-leave-active {
+  transition: opacity 0.2s ease;
+}
+
+.page-fade-enter-from,
+.page-fade-leave-to {
+  opacity: 0;
+}
+</style>

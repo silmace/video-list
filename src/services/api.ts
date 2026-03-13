@@ -1,4 +1,5 @@
 import axios from 'axios';
+import { getStoredString, removeStoredValue, setStoredString } from '@/lib/safeStorage';
 
 export const AUTH_TOKEN_KEY = 'video_list_auth_token';
 
@@ -6,13 +7,13 @@ export const api = axios.create({
   baseURL: '/',
 });
 
-export const getAuthToken = (): string => localStorage.getItem(AUTH_TOKEN_KEY) || '';
+export const getAuthToken = (): string => getStoredString(AUTH_TOKEN_KEY, '');
 
 export const setAuthToken = (token: string): void => {
   if (token) {
-    localStorage.setItem(AUTH_TOKEN_KEY, token);
+    setStoredString(AUTH_TOKEN_KEY, token);
   } else {
-    localStorage.removeItem(AUTH_TOKEN_KEY);
+    removeStoredValue(AUTH_TOKEN_KEY);
   }
 };
 

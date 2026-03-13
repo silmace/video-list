@@ -33,6 +33,9 @@ import ImagePreviewDialog from './file-manager/ImagePreviewDialog.vue';
 import { authState } from '../composables/useAuth';
 import { inferFileType, useFileVisuals } from '../composables/useFileVisuals';
 import { useLocale } from '../composables/useLocale';
+import { getStoredJSON, setStoredString } from '@/lib/safeStorage';
+import { Button } from '@/components/ui/button';
+import { Input } from '@/components/ui/input';
 
 type SnackbarTone = 'success' | 'error' | 'warning' | 'info';
 type TransferMode = 'move' | 'copy';
@@ -99,16 +102,12 @@ const accentColor = computed(() => {
 const transferTitle = computed(() => (transferMode.value === 'copy' ? t('copySelection') : t('moveSelection')));
 
 function loadFavorites(): string[] {
-  try {
-    const parsed = JSON.parse(localStorage.getItem(FAVORITES_STORAGE_KEY) || '[]') as string[];
-    return Array.isArray(parsed) ? parsed.filter((value) => typeof value === 'string') : [];
-  } catch {
-    return [];
-  }
+  const parsed = getStoredJSON<string[]>(FAVORITES_STORAGE_KEY, []);
+  return Array.isArray(parsed) ? parsed.filter((value) => typeof value === 'string') : [];
 }
 
 function persistFavorites() {
-  localStorage.setItem(FAVORITES_STORAGE_KEY, JSON.stringify(favorites.value));
+  setStoredString(FAVORITES_STORAGE_KEY, JSON.stringify(favorites.value));
 }
 
 function showSnackbar(message: string, tone: SnackbarTone) {
@@ -228,6 +227,14 @@ function isImage(name: string) {
   return inferFileType({ name, isDirectory: false } as FileItem) === 'image';
 }
 
+function encodeRoutePath(path: string) {
+  return path
+    .split('/')
+    .filter(Boolean)
+    .map((segment) => encodeURIComponent(segment))
+    .join('/');
+}
+
 function formatSize(size: number): string {
   const units = ['B', 'KB', 'MB', 'GB', 'TB'];
   let value = size;
@@ -278,7 +285,7 @@ async function openFile(file: FileItem) {
   }
   if (isVideo(file.name)) {
     const videoPath = file.path.startsWith('/') ? file.path.slice(1) : file.path;
-    await router.push(`/edit/${videoPath}`);
+    await router.push(`/edit/${encodeRoutePath(videoPath)}`);
     return;
   }
   if (isImage(file.name)) {
@@ -651,22 +658,22 @@ onBeforeUnmount(() => {
       </button>
 
       <div v-if="toolbarExpanded" class="toolbar-list">
-        <button type="button" class="shad-btn" :disabled="loading" @click="fetchFiles(currentPath, false)">
+        <Button variant="outline" class="tool-btn" :disabled="loading" @click="fetchFiles(currentPath, false)">
           <RefreshCw :size="16" :class="{ spin: loading }" />
           {{ t('refresh') }}
-        </button>
-        <button type="button" class="shad-btn" @click="showCreateFolderDialog = true">
+        </Button>
+        <Button variant="outline" class="tool-btn" @click="showCreateFolderDialog = true">
           <FolderPlus :size="16" />
           {{ t('newFolder') }}
-        </button>
-        <button type="button" class="shad-btn shad-btn-primary" :disabled="uploading" @click="openUploadDialog">
+        </Button>
+        <Button class="tool-btn" :disabled="uploading" @click="openUploadDialog">
           <Upload :size="16" />
           {{ uploading ? t('uploadingNow') : t('upload') }}
-        </button>
-        <button type="button" class="shad-btn" @click="toggleFavorite(currentPath)">
+        </Button>
+        <Button variant="outline" class="tool-btn" @click="toggleFavorite(currentPath)">
           <Star :size="16" />
           {{ favorites.includes(currentPath) ? t('favoriteSaved') : t('addFavorite') }}
-        </button>
+        </Button>
 
         <div v-if="uploading" class="upload-progress-shell">
           <div class="upload-track">
@@ -731,23 +738,28 @@ onBeforeUnmount(() => {
 
     <div v-if="hasSelection" class="floating-action-bar">
       <span class="selection-count">{{ t('selectedCount', { count: selectedCount }) }}</span>
-      <button type="button" class="shad-btn shad-btn-danger" @click="showDeleteDialog = true">
+      <Button variant="destructive" size="sm" @click="showDeleteDialog = true">
         <Trash2 :size="14" />
         {{ t('delete') }}
-      </button>
-      <button type="button" class="shad-btn" @click="openTransfer('move')">
+      </Button>
+      <Button variant="outline" size="sm" @click="openTransfer('move')">
         <MoveRight :size="14" />
         {{ t('move') }}
-      </button>
-      <button type="button" class="shad-btn" @click="openTransfer('copy')">
+      </Button>
+      <Button variant="outline" size="sm" @click="openTransfer('copy')">
         <Copy :size="14" />
         {{ t('copy') }}
-      </button>
-      <button type="button" class="shad-btn" @click="downloadSelected">{{ t('download') }}</button>
-      <button type="button" class="shad-btn" :disabled="selectedCount !== 1" @click="selectedSingleItem && openRenameDialog(selectedSingleItem)">
+      </Button>
+      <Button variant="outline" size="sm" @click="downloadSelected">{{ t('download') }}</Button>
+      <Button
+        variant="outline"
+        size="sm"
+        :disabled="selectedCount !== 1"
+        @click="selectedSingleItem && openRenameDialog(selectedSingleItem)"
+      >
         {{ t('rename') }}
-      </button>
-      <button type="button" class="shad-btn" @click="clearSelection">{{ t('clear') }}</button>
+      </Button>
+      <Button variant="ghost" size="sm" @click="clearSelection">{{ t('clear') }}</Button>
     </div>
 
     <DestinationPickerDialog
@@ -766,13 +778,11 @@ onBeforeUnmount(() => {
     <div v-if="showCreateFolderDialog" class="modal-overlay" @click.self="showCreateFolderDialog = false">
       <div class="modal-card">
         <h3>{{ t('newFolder') }}</h3>
-        <label class="input-shell">
-          <input v-model="newFolderName" type="text" :placeholder="t('folderName')" @keyup.enter="createFolderAction">
-        </label>
+        <Input v-model="newFolderName" :placeholder="t('folderName')" @keyup.enter="createFolderAction" />
         <p class="modal-hint">{{ t('folderNameHint') }}</p>
         <div class="modal-actions">
-          <button type="button" class="shad-btn" @click="showCreateFolderDialog = false">{{ t('cancel') }}</button>
-          <button type="button" class="shad-btn shad-btn-primary" @click="createFolderAction">{{ t('create') }}</button>
+          <Button variant="outline" @click="showCreateFolderDialog = false">{{ t('cancel') }}</Button>
+          <Button @click="createFolderAction">{{ t('create') }}</Button>
         </div>
       </div>
     </div>
@@ -780,15 +790,13 @@ onBeforeUnmount(() => {
     <div v-if="showRenameDialog" class="modal-overlay" @click.self="showRenameDialog = false">
       <div class="modal-card">
         <h3>{{ t('rename') }}</h3>
-        <label class="input-shell">
-          <input v-model="renameName" type="text" :placeholder="t('newName')" @keyup.enter="renameFileAction">
-        </label>
+        <Input v-model="renameName" :placeholder="t('newName')" @keyup.enter="renameFileAction" />
         <p class="modal-hint">{{ t('renameHint') }}</p>
         <div class="modal-actions">
-          <button type="button" class="shad-btn" @click="showRenameDialog = false">{{ t('cancel') }}</button>
-          <button type="button" class="shad-btn shad-btn-primary" :disabled="submittingRename" @click="renameFileAction">
+          <Button variant="outline" @click="showRenameDialog = false">{{ t('cancel') }}</Button>
+          <Button :disabled="submittingRename" @click="renameFileAction">
             {{ t('rename') }}
-          </button>
+          </Button>
         </div>
       </div>
     </div>
@@ -798,8 +806,8 @@ onBeforeUnmount(() => {
         <h3>{{ t('deleteSelectionTitle') }}</h3>
         <p class="modal-hint">{{ t('deleteSelectionHint', { count: selectedCount }) }}</p>
         <div class="modal-actions">
-          <button type="button" class="shad-btn" @click="showDeleteDialog = false">{{ t('cancel') }}</button>
-          <button type="button" class="shad-btn shad-btn-danger" @click="createDeleteTask">{{ t('confirmDelete') }}</button>
+          <Button variant="outline" @click="showDeleteDialog = false">{{ t('cancel') }}</Button>
+          <Button variant="destructive" @click="createDeleteTask">{{ t('confirmDelete') }}</Button>
         </div>
       </div>
     </div>
@@ -894,6 +902,11 @@ onBeforeUnmount(() => {
   display: grid;
   gap: 8px;
   padding: 10px;
+}
+
+.tool-btn {
+  justify-content: flex-start;
+  border-radius: 999px;
 }
 
 .upload-progress-shell {
@@ -1098,7 +1111,7 @@ onBeforeUnmount(() => {
     grid-template-columns: 1fr 1fr;
   }
 
-  .toolbar-list .shad-btn {
+  .toolbar-list button {
     width: 100%;
   }
 
@@ -1109,7 +1122,7 @@ onBeforeUnmount(() => {
     padding: 8px;
   }
 
-  .floating-action-bar .shad-btn {
+  .floating-action-bar button {
     font-size: 12px;
     padding: 7px 9px;
   }

@@ -1,13 +1,16 @@
 <script setup lang="ts">
 import { computed, onMounted, onUnmounted, ref } from 'vue';
 import { useRoute, useRouter } from 'vue-router';
-import { useDisplay } from 'vuetify';
 import type { VideoCodecOption, VideoExportMode, VideoSegment } from '../types';
 import { buildMediaUrl } from '../services/api';
 import { createVideoTask as createVideoTaskRequest, fetchVideoOptions } from '../services/video';
 import Artplayer from 'artplayer';
 import PathBreadcrumb from './PathBreadcrumb.vue';
 import { useLocale } from '../composables/useLocale';
+import { Alert } from '@/components/ui/alert';
+import { Badge } from '@/components/ui/badge';
+import { Button } from '@/components/ui/button';
+import { Card } from '@/components/ui/card';
 
 const route = useRoute();
 const router = useRouter();
@@ -23,7 +26,7 @@ const latestTaskId = ref('');
 const currentPlaybackTime = ref('00:00:00');
 let art: Artplayer | null = null;
 const { t } = useLocale();
-const { smAndDown } = useDisplay();
+const mediaUrl = computed(() => buildMediaUrl(videoPath.value));
 
 const availableCodecOptions = computed(() => codecOptions.value.filter((item) => item.mode === exportMode.value));
 const segmentErrors = computed(() => segments.value.map((segment) => validateSegment(segment)));
@@ -35,10 +38,20 @@ const totalClipDuration = computed(() => {
 
 const getVideoPath = () => {
   if (!route.params.pathMatch) return '';
-  const path = Array.isArray(route.params.pathMatch)
+  const rawPath = Array.isArray(route.params.pathMatch)
     ? route.params.pathMatch.join('/')
     : route.params.pathMatch;
-  return `/${path}`;
+  const decodedPath = rawPath
+    .split('/')
+    .map((segment) => {
+      try {
+        return decodeURIComponent(segment);
+      } catch {
+        return segment;
+      }
+    })
+    .join('/');
+  return `/${decodedPath}`;
 };
 
 const showSnackbar = (message: string, color: string) => {
@@ -61,7 +74,7 @@ onMounted(() => {
   if (artRef.value) {
     art = new Artplayer({
       container: artRef.value,
-      url: buildMediaUrl(videoPath.value),
+      url: mediaUrl.value,
       volume: 0.5,
       autoplay: false,
       pip: true,
@@ -82,6 +95,11 @@ onMounted(() => {
       autoOrientation: true,
       theme: '#0f766e',
     });
+
+    art.on('video:error', () => {
+      showSnackbar('Video failed to load, check format/token/path.', 'error');
+    });
+
     art.on('video:timeupdate', () => {
       currentPlaybackTime.value = formatTime(art?.currentTime || 0);
     });
@@ -230,121 +248,98 @@ onMounted(async () => {
 </script>
 
 <template>
-  <v-container class="app-page">
-    <v-card class="glass-panel mb-4">
-      <v-card-text>
-        <PathBreadcrumb :path="videoPath" :onNavigate="handlePathNavigation" />
-      </v-card-text>
-    </v-card>
+  <div class="app-page grid gap-4">
+    <Card class="glass-panel p-4">
+      <PathBreadcrumb :path="videoPath" :onNavigate="handlePathNavigation" />
+    </Card>
 
-    <v-card class="glass-panel">
-      <v-card-title class="px-4 pt-4 d-flex flex-wrap align-center ga-3" :class="smAndDown ? 'text-h6' : 'text-h5'">
-        <span>{{ getFileName() }}</span>
-        <v-chip size="small" color="secondary" variant="tonal">{{ t('currentPlaybackTime') }} {{ currentPlaybackTime }}</v-chip>
-        <v-chip size="small" color="primary" variant="tonal">{{ t('totalClipDuration') }} {{ formatDuration(totalClipDuration) }}</v-chip>
-      </v-card-title>
+    <Card class="glass-panel p-4 md:p-5">
+      <div class="mb-4 flex flex-wrap items-center gap-2">
+        <h1 class="text-2xl font-extrabold tracking-tight">{{ getFileName() }}</h1>
+        <Badge variant="secondary">{{ t('currentPlaybackTime') }} {{ currentPlaybackTime }}</Badge>
+        <Badge>{{ t('totalClipDuration') }} {{ formatDuration(totalClipDuration) }}</Badge>
+      </div>
 
-      <v-card-text>
-        <div ref="artRef" class="video-player mb-6" />
+      <div ref="artRef" class="video-player mb-6" />
 
-        <div class="export-panel mb-6">
-          <div class="text-subtitle-1 mb-2">{{ t('exportModeTitle') }}</div>
-          <div class="d-flex flex-wrap ga-2 mb-4 mode-btn-row">
-            <v-btn :variant="exportMode === 'copy' ? 'flat' : 'tonal'" class="pill-button mode-btn" @click="selectExportMode('copy')">
-              {{ t('exportMode_copy') }}
-            </v-btn>
-            <v-btn :variant="exportMode === 'transcode' ? 'flat' : 'tonal'" class="pill-button mode-btn" @click="selectExportMode('transcode')">
-              {{ t('exportMode_transcode') }}
-            </v-btn>
-          </div>
-
-          <div class="text-subtitle-1 mb-2">{{ t('videoCodecTitle') }}</div>
-          <div class="d-flex flex-wrap ga-2 codec-chip-row">
-            <v-chip
-              v-for="codec in availableCodecOptions"
-              :key="codec.id"
-              :color="codec.id === selectedCodec ? 'primary' : 'default'"
-              :variant="codec.id === selectedCodec ? 'flat' : 'outlined'"
-              @click="selectedCodec = codec.id"
-            >
-              {{ codec.label }}
-            </v-chip>
-          </div>
+      <section class="export-panel mb-6">
+        <div class="mb-2 text-sm font-semibold text-[var(--text-2)]">{{ t('exportModeTitle') }}</div>
+        <div class="mode-btn-row mb-4">
+          <Button :variant="exportMode === 'copy' ? 'default' : 'outline'" class="mode-btn" @click="selectExportMode('copy')">
+            {{ t('exportMode_copy') }}
+          </Button>
+          <Button :variant="exportMode === 'transcode' ? 'default' : 'outline'" class="mode-btn" @click="selectExportMode('transcode')">
+            {{ t('exportMode_transcode') }}
+          </Button>
         </div>
 
-        <div v-for="(segment, index) in segments" :key="index" class="mb-2">
-          <v-card variant="tonal">
-            <v-card-title>
-              <v-row align="center" justify="space-between" style="width: 100%">
-                <v-col cols="auto">{{ t('segment') }} {{ index + 1 }} · {{ formatDuration(Math.max(0, parseTime(segment.endTime) - parseTime(segment.startTime))) }}</v-col>
-                <v-col cols="auto">
-                  <v-btn color="primary" variant="text" icon @click.stop="moveSegment(index, -1)" :disabled="index === 0">
-                    <v-icon>mdi-arrow-up</v-icon>
-                  </v-btn>
-                  <v-btn color="primary" variant="text" icon @click.stop="moveSegment(index, 1)" :disabled="index === segments.length - 1">
-                    <v-icon>mdi-arrow-down</v-icon>
-                  </v-btn>
-                  <v-btn color="secondary" variant="text" icon @click.stop="duplicateSegment(index)">
-                    <v-icon>mdi-content-copy</v-icon>
-                  </v-btn>
-                  <v-btn
-                    color="error"
-                    variant="text"
-                    icon
-                    @click.stop="removeSegment(index)"
-                    :disabled="segments.length === 1"
-                  >
-                    <v-icon>mdi-delete</v-icon>
-                  </v-btn>
-                </v-col>
-              </v-row>
-            </v-card-title>
-            <v-card-text>
-              <v-row>
-                <v-col cols="12" sm="6">
-                  <v-text-field v-model="segment.startTime" :label="t('startTime')" hide-details>
-                    <template #append>
-                      <v-btn color="primary" @click="setCurrentTime(index, 'start')">{{ t('setCurrent') }}</v-btn>
-                    </template>
-                  </v-text-field>
-                </v-col>
-
-                <v-col cols="12" sm="6">
-                  <v-text-field v-model="segment.endTime" :label="t('endTime')" hide-details>
-                    <template #append>
-                      <v-btn color="primary" @click="setCurrentTime(index, 'end')">{{ t('setCurrent') }}</v-btn>
-                    </template>
-                  </v-text-field>
-                </v-col>
-              </v-row>
-              <v-alert v-if="segmentErrors[index]" type="warning" variant="tonal" class="mt-4">
-                {{ segmentErrors[index] }}
-              </v-alert>
-            </v-card-text>
-          </v-card>
+        <div class="mb-2 text-sm font-semibold text-[var(--text-2)]">{{ t('videoCodecTitle') }}</div>
+        <div class="codec-chip-row">
+          <Button
+            v-for="codec in availableCodecOptions"
+            :key="codec.id"
+            :variant="codec.id === selectedCodec ? 'default' : 'outline'"
+            size="sm"
+            @click="selectedCodec = codec.id"
+          >
+            {{ codec.label }}
+          </Button>
         </div>
+      </section>
 
-        <v-alert v-if="latestTaskId" type="info" variant="tonal" class="mt-4">
-          {{ t('latestTaskId') }}: <code>{{ latestTaskId }}</code>
-        </v-alert>
-      </v-card-text>
+      <section class="grid gap-3">
+        <article v-for="(segment, index) in segments" :key="index" class="segment-card rounded-xl border p-4">
+          <div class="mb-3 flex flex-wrap items-center justify-between gap-2">
+            <div class="font-semibold">
+              {{ t('segment') }} {{ index + 1 }} · {{ formatDuration(Math.max(0, parseTime(segment.endTime) - parseTime(segment.startTime))) }}
+            </div>
+            <div class="flex flex-wrap gap-2">
+              <Button variant="outline" size="sm" :disabled="index === 0" @click.stop="moveSegment(index, -1)">Up</Button>
+              <Button variant="outline" size="sm" :disabled="index === segments.length - 1" @click.stop="moveSegment(index, 1)">Down</Button>
+              <Button variant="secondary" size="sm" @click.stop="duplicateSegment(index)">Copy</Button>
+              <Button variant="destructive" size="sm" :disabled="segments.length === 1" @click.stop="removeSegment(index)">Delete</Button>
+            </div>
+          </div>
 
-      <v-card-actions class="px-4 pb-4 editor-actions">
-        <v-btn color="primary" variant="outlined" prepend-icon="mdi-plus" @click="addSegment">{{ t('addSegment') }}</v-btn>
-        <v-spacer />
-        <v-btn color="secondary" variant="tonal" prepend-icon="mdi-progress-clock" @click="openTaskCenter">
-          {{ t('taskCenterBtn') }}
-        </v-btn>
-        <v-btn color="primary" prepend-icon="mdi-rocket-launch" :loading="loading" :disabled="hasInvalidSegments || !hasValidCodecSelection" @click="createVideoTask">
-          {{ t('createVideoTask') }}
-        </v-btn>
-      </v-card-actions>
-    </v-card>
+          <div class="segment-grid">
+            <label class="field-shell">
+              <span>{{ t('startTime') }}</span>
+              <input v-model="segment.startTime" type="text" placeholder="00:00:00">
+              <Button variant="outline" size="sm" class="w-fit" @click="setCurrentTime(index, 'start')">{{ t('setCurrent') }}</Button>
+            </label>
 
-    <v-snackbar v-model="snackbar.show" :color="snackbar.color">
+            <label class="field-shell">
+              <span>{{ t('endTime') }}</span>
+              <input v-model="segment.endTime" type="text" placeholder="00:00:00">
+              <Button variant="outline" size="sm" class="w-fit" @click="setCurrentTime(index, 'end')">{{ t('setCurrent') }}</Button>
+            </label>
+          </div>
+
+          <Alert v-if="segmentErrors[index]" variant="warning" class="mt-3">
+            {{ segmentErrors[index] }}
+          </Alert>
+        </article>
+      </section>
+
+      <Alert v-if="latestTaskId" class="mt-4">
+        {{ t('latestTaskId') }}: <code>{{ latestTaskId }}</code>
+      </Alert>
+
+      <div class="editor-actions mt-5">
+        <Button variant="outline" @click="addSegment">{{ t('addSegment') }}</Button>
+        <div class="action-right">
+          <Button variant="secondary" @click="openTaskCenter">{{ t('taskCenterBtn') }}</Button>
+          <Button :disabled="loading || hasInvalidSegments || !hasValidCodecSelection" @click="createVideoTask">
+            {{ loading ? '...' : t('createVideoTask') }}
+          </Button>
+        </div>
+      </div>
+    </Card>
+
+    <div v-if="snackbar.show" class="snackbar" :class="`snackbar-${snackbar.color}`">
       {{ snackbar.message }}
-    </v-snackbar>
-  </v-container>
+    </div>
+  </div>
 </template>
 
 <style scoped>
@@ -362,7 +357,85 @@ onMounted(async () => {
   background: color-mix(in srgb, var(--surface-2) 92%, transparent);
 }
 
+.segment-card {
+  border-color: var(--border-soft);
+  background: color-mix(in srgb, var(--surface-2) 88%, transparent);
+}
+
+.segment-grid {
+  display: grid;
+  gap: 10px;
+  grid-template-columns: 1fr;
+}
+
+.field-shell {
+  display: grid;
+  gap: 6px;
+  font-size: 13px;
+  font-weight: 700;
+  color: var(--text-2);
+}
+
+.field-shell input {
+  width: 100%;
+  min-height: 38px;
+  border-radius: 10px;
+  border: 1px solid var(--border-soft);
+  background: color-mix(in srgb, var(--surface-3) 90%, transparent);
+  padding: 8px 10px;
+  color: var(--text-1);
+}
+
+.mode-btn-row,
+.codec-chip-row {
+  display: flex;
+  gap: 8px;
+  flex-wrap: wrap;
+}
+
+.editor-actions {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px;
+  align-items: center;
+  justify-content: space-between;
+}
+
+.action-right {
+  display: flex;
+  gap: 8px;
+  flex-wrap: wrap;
+}
+
+.snackbar {
+  position: fixed;
+  right: 16px;
+  bottom: 16px;
+  z-index: 40;
+  border-radius: 10px;
+  padding: 10px 12px;
+  color: #fff;
+  box-shadow: var(--shadow-lg);
+}
+
+.snackbar-success {
+  background: #166534;
+}
+
+.snackbar-error,
+.snackbar-warning {
+  background: #b45309;
+}
+
+.snackbar-info {
+  background: #0f766e;
+}
+
 @media (max-width: 960px) {
+  .segment-grid {
+    grid-template-columns: 1fr;
+  }
+
   .mode-btn-row,
   .codec-chip-row {
     display: grid;
@@ -379,12 +452,20 @@ onMounted(async () => {
     gap: 8px;
   }
 
-  .editor-actions :deep(.v-spacer) {
-    display: none;
+  .editor-actions .action-right,
+  .editor-actions .mode-btn {
+    width: 100%;
   }
 
-  .editor-actions .v-btn {
+  .editor-actions .action-right :deep(button),
+  .editor-actions :deep(button) {
     width: 100%;
+  }
+}
+
+@media (min-width: 900px) {
+  .segment-grid {
+    grid-template-columns: 1fr 1fr;
   }
 }
 </style>

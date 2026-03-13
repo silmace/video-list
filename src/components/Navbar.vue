@@ -1,15 +1,15 @@
 <script setup lang="ts">
 import { useRouter } from 'vue-router';
 import { onMounted } from 'vue';
-import { useDisplay } from 'vuetify';
+import { FolderKanban, ListTodo, LogIn, LogOut, MoonStar, Settings, SunMedium } from 'lucide-vue-next';
 import { authState, checkAuthStatus, logout } from '../composables/useAuth';
 import { useLocale } from '../composables/useLocale';
 import { useThemePreference } from '../composables/useThemePreference';
+import { Button } from '@/components/ui/button';
 
 const router = useRouter();
 const { t } = useLocale();
 const { isDark, toggleTheme } = useThemePreference();
-const { smAndDown } = useDisplay();
 
 const navigateHome = () => {
   router.push('/');
@@ -39,84 +39,123 @@ onMounted(async () => {
 </script>
 
 <template>
-  <v-app-bar class="glass-appbar navbar-shell" elevation="0">
+  <header class="glass-appbar navbar-shell">
+    <div class="navbar-row">
+      <Button variant="ghost" class="navbar-brand" @click="navigateHome">
+        <FolderKanban :size="18" />
+        <span class="brand-title">{{ t('appTitle') }}</span>
+      </Button>
 
-    <v-app-bar-title>
-      <v-btn variant="text" @click="navigateHome" class="navbar-brand pill-button">
-        <v-icon start icon="mdi-folder-multiple-image" color="secondary"></v-icon>
-        {{ t('appTitle') }}
-      </v-btn>
-    </v-app-bar-title>
-
-    <template v-slot:append>
-      <v-btn
-        v-if="!authState.authEnabled.value || authState.authenticated.value"
-        variant="text"
-        icon="mdi-progress-clock"
-        :title="t('tasks')"
-        :aria-label="t('tasks')"
-        @click="navigateTasks"
-      />
-      <v-btn
-        v-if="!authState.authEnabled.value || authState.authenticated.value"
-        variant="text"
-        icon="mdi-cog-outline"
-        :title="t('settings')"
-        :aria-label="t('settings')"
-        @click="navigateSettings"
-      />
-      <v-btn
-        variant="tonal"
-        class="pill-button"
-        :icon="smAndDown ? (isDark ? 'mdi-weather-night' : 'mdi-white-balance-sunny') : undefined"
-        :prepend-icon="smAndDown ? undefined : (isDark ? 'mdi-weather-night' : 'mdi-white-balance-sunny')"
-        :title="isDark ? t('darkModeOn') : t('lightModeOn')"
-        :aria-label="isDark ? t('darkModeOn') : t('lightModeOn')"
-        @click="toggleTheme"
-      >
-        <span v-if="!smAndDown">{{ isDark ? t('darkModeOn') : t('lightModeOn') }}</span>
-      </v-btn>
-      <v-btn
-        v-if="authState.authEnabled.value && !authState.authenticated.value"
-        variant="tonal"
-        class="pill-button"
-        color="primary"
-        @click="navigateLogin"
-      >
-        {{ t('login') }}
-      </v-btn>
-      <v-btn
-        v-if="authState.authEnabled.value && authState.authenticated.value"
-        variant="tonal"
-        class="pill-button"
-        color="error"
-        :icon="'mdi-logout'"
-        @click="doLogout"
-      >
-      </v-btn>
-    </template>
-  </v-app-bar>
+      <div class="navbar-actions">
+        <Button
+          v-if="!authState.authEnabled.value || authState.authenticated.value"
+          variant="ghost"
+          size="icon"
+          :title="t('tasks')"
+          :aria-label="t('tasks')"
+          @click="navigateTasks"
+        >
+          <ListTodo :size="18" />
+        </Button>
+        <Button
+          v-if="!authState.authEnabled.value || authState.authenticated.value"
+          variant="ghost"
+          size="icon"
+          :title="t('settings')"
+          :aria-label="t('settings')"
+          @click="navigateSettings"
+        >
+          <Settings :size="18" />
+        </Button>
+        <Button
+          variant="outline"
+          class="theme-toggle"
+          :title="isDark ? t('darkModeOn') : t('lightModeOn')"
+          :aria-label="isDark ? t('darkModeOn') : t('lightModeOn')"
+          @click="toggleTheme"
+        >
+          <MoonStar v-if="isDark" :size="16" />
+          <SunMedium v-else :size="16" />
+          <span class="theme-label">{{ isDark ? t('darkModeOn') : t('lightModeOn') }}</span>
+        </Button>
+        <Button
+          v-if="authState.authEnabled.value && !authState.authenticated.value"
+          variant="default"
+          @click="navigateLogin"
+        >
+          <LogIn :size="16" />
+          {{ t('login') }}
+        </Button>
+        <Button
+          v-if="authState.authEnabled.value && authState.authenticated.value"
+          variant="destructive"
+          size="icon"
+          title="Logout"
+          aria-label="Logout"
+          @click="doLogout"
+        >
+          <LogOut :size="16" />
+        </Button>
+      </div>
+    </div>
+  </header>
 </template>
 
 <style scoped>
 .navbar-shell {
-  padding-inline: 10px;
+  position: sticky;
+  top: 0;
+  z-index: 20;
+  padding: 10px 12px;
+}
+
+.navbar-row {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 10px;
 }
 
 .navbar-brand {
-  font-size: 1rem;
+  display: inline-flex;
+  align-items: center;
+  gap: 8px;
+  border-radius: 999px;
   font-weight: 800;
-  letter-spacing: -0.03em;
+}
+
+.brand-title {
+  letter-spacing: -0.02em;
+}
+
+.navbar-actions {
+  display: flex;
+  align-items: center;
+  justify-content: flex-end;
+  gap: 8px;
+}
+
+.theme-toggle {
+  border-radius: 999px;
+}
+
+.theme-label {
+  display: inline-flex;
+  align-items: center;
 }
 
 @media (max-width: 720px) {
   .navbar-shell {
-    padding-inline: 4px;
+    padding: 8px;
   }
 
-  .navbar-brand {
-    min-width: 44px;
-    padding-inline: 8px;
+  .brand-title,
+  .theme-label {
+    display: none;
+  }
+
+  .navbar-actions {
+    gap: 6px;
   }
 }
 </style>

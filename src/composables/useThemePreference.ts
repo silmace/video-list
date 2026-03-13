@@ -1,36 +1,30 @@
 import { computed, ref, watch } from 'vue';
-import { useTheme } from 'vuetify';
+import { getStoredString, setStoredString } from '@/lib/safeStorage';
 
 export type AppThemeName = 'light' | 'dark';
 
 const STORAGE_KEY = 'video_list_theme';
-const themeName = ref<AppThemeName>((localStorage.getItem(STORAGE_KEY) || localStorage.getItem('theme')) === 'dark' ? 'dark' : 'light');
+const themeName = ref<AppThemeName>((getStoredString(STORAGE_KEY) || getStoredString('theme')) === 'dark' ? 'dark' : 'light');
 let initialized = false;
 
-function applyTheme(nextTheme: AppThemeName, setVuetifyTheme: (name: AppThemeName) => void) {
-  setVuetifyTheme(nextTheme);
+function applyTheme(nextTheme: AppThemeName) {
   document.body.dataset.theme = nextTheme;
-  localStorage.setItem(STORAGE_KEY, nextTheme);
+  document.documentElement.dataset.theme = nextTheme;
+  setStoredString(STORAGE_KEY, nextTheme);
 }
 
 export function useThemePreference() {
-  const theme = useTheme();
-
   if (!initialized) {
     initialized = true;
     watch(
       themeName,
       (nextTheme) => {
-        applyTheme(nextTheme, (name) => {
-          theme.global.name.value = name;
-        });
+        applyTheme(nextTheme);
       },
       { immediate: true }
     );
   } else {
-    applyTheme(themeName.value, (name) => {
-      theme.global.name.value = name;
-    });
+    applyTheme(themeName.value);
   }
 
   const setTheme = (nextTheme: AppThemeName) => {

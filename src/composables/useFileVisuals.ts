@@ -1,5 +1,6 @@
 import { computed, ref } from 'vue';
 import type { FileItem } from '../types';
+import { getStoredJSON, setStoredString } from '@/lib/safeStorage';
 
 export type FileType = 'folder' | 'video' | 'image' | 'audio' | 'archive' | 'document' | 'code' | 'other';
 
@@ -32,29 +33,20 @@ const fileTypePalette: Record<FileType, string> = {
 const customTags = ref<CustomColorTag[]>(loadStoredTags());
 
 function loadStoredTags(): CustomColorTag[] {
-  const raw = localStorage.getItem(TAG_STORAGE_KEY);
-  if (!raw) {
+  const parsed = getStoredJSON<CustomColorTag[]>(TAG_STORAGE_KEY, [...defaultTags]);
+  if (!Array.isArray(parsed) || parsed.length === 0) {
     return [...defaultTags];
   }
-
-  try {
-    const parsed = JSON.parse(raw) as CustomColorTag[];
-    if (!Array.isArray(parsed) || parsed.length === 0) {
-      return [...defaultTags];
-    }
-    return parsed.filter((item) =>
-      typeof item.id === 'string' &&
-      typeof item.label === 'string' &&
-      typeof item.pattern === 'string' &&
-      typeof item.color === 'string'
-    );
-  } catch {
-    return [...defaultTags];
-  }
+  return parsed.filter((item) =>
+    typeof item.id === 'string' &&
+    typeof item.label === 'string' &&
+    typeof item.pattern === 'string' &&
+    typeof item.color === 'string'
+  );
 }
 
 function persistTags() {
-  localStorage.setItem(TAG_STORAGE_KEY, JSON.stringify(customTags.value));
+  setStoredString(TAG_STORAGE_KEY, JSON.stringify(customTags.value));
 }
 
 function normalizedPatterns(pattern: string): string[] {

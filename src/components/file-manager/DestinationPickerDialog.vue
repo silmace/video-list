@@ -2,6 +2,8 @@
 import type { FileItem } from '../../types';
 import PathBreadcrumb from '../PathBreadcrumb.vue';
 import { useLocale } from '../../composables/useLocale';
+import { Button } from '@/components/ui/button';
+import { Input } from '@/components/ui/input';
 
 defineProps<{
   open: boolean;
@@ -34,31 +36,33 @@ const { t } = useLocale();
 
       <PathBreadcrumb :path="path" :on-navigate="(nextPath) => emit('browse', nextPath)" />
 
-      <label class="input-shell">
-        <input :value="path" type="text" :placeholder="t('destinationPath')" @input="emit('updatePath', ($event.target as HTMLInputElement).value)">
-      </label>
+      <Input
+        :model-value="path"
+        :placeholder="t('destinationPath')"
+        @update:modelValue="emit('updatePath', $event)"
+      />
 
       <div class="folder-grid">
-        <button type="button" class="folder-chip" @click="emit('browse', '/')">{{ t('home') }}</button>
-        <button
+        <Button variant="outline" class="folder-chip" @click="emit('browse', '/')">{{ t('home') }}</Button>
+        <Button
           v-for="folder in folders"
           :key="folder.path"
-          type="button"
+          variant="outline"
           class="folder-chip"
           @click="emit('browse', folder.path)"
         >
           {{ folder.name }}
-        </button>
+        </Button>
       </div>
 
       <div v-if="busy" class="dialog-note">{{ t('loadingFiles') }}</div>
       <div v-else-if="folders.length === 0" class="dialog-note">{{ t('noFoldersHere') }}</div>
 
       <div class="modal-actions">
-        <button type="button" class="shad-btn" @click="emit('close')">{{ t('cancel') }}</button>
-        <button type="button" class="shad-btn shad-btn-primary" :disabled="submitting" @click="emit('confirm')">
+        <Button variant="outline" @click="emit('close')">{{ t('cancel') }}</Button>
+        <Button :disabled="submitting" @click="emit('confirm')">
           {{ t('createTask') }}
-        </button>
+        </Button>
       </div>
     </div>
   </div>
@@ -82,11 +86,7 @@ const { t } = useLocale();
 }
 
 .folder-chip {
-  border: 1px solid var(--border-soft);
-  background: color-mix(in srgb, var(--surface-2) 94%, transparent);
-  color: var(--text-1);
   border-radius: 999px;
-  padding: 8px 12px;
-  cursor: pointer;
+  justify-content: flex-start;
 }
 </style>

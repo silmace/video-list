@@ -3,6 +3,10 @@ import { onMounted, ref } from 'vue';
 import { useRouter } from 'vue-router';
 import { authState, checkAuthStatus, login } from '../composables/useAuth';
 import { useLocale } from '../composables/useLocale';
+import { Alert } from '@/components/ui/alert';
+import { Button } from '@/components/ui/button';
+import { Card } from '@/components/ui/card';
+import { Input } from '@/components/ui/input';
 
 const router = useRouter();
 const password = ref('');
@@ -32,39 +36,45 @@ onMounted(async () => {
 </script>
 
 <template>
-  <v-container class="fill-height d-flex align-center justify-center">
-    <v-card class="glass-panel pa-6" max-width="420" width="100%">
-      <v-card-title class="text-h5">{{ t('signIn') }}</v-card-title>
-      <v-card-subtitle class="mb-4">{{ t('signInSubtitle') }}</v-card-subtitle>
+  <div class="app-page login-shell">
+    <Card class="glass-panel login-card p-6">
+      <h1 class="text-2xl font-extrabold tracking-tight">{{ t('signIn') }}</h1>
+      <p class="mt-1 text-sm text-[var(--text-2)]">{{ t('signInSubtitle') }}</p>
 
-      <v-alert
-        v-if="errorMessage"
-        type="error"
-        variant="tonal"
-        density="comfortable"
-        class="mb-4"
-      >
+      <Alert v-if="errorMessage" variant="error" class="mt-4">
         {{ errorMessage }}
-      </v-alert>
+      </Alert>
 
-      <v-text-field
-        v-model="password"
-        type="password"
-        :label="t('password')"
-        variant="outlined"
-        density="comfortable"
-        @keyup.enter="submit"
-      />
+      <div class="mt-4 grid gap-3">
+        <label class="text-sm font-semibold text-[var(--text-2)]">{{ t('password') }}</label>
+        <Input
+          v-model="password"
+          type="password"
+          :placeholder="t('password')"
+          @keyup.enter="submit"
+        />
+      </div>
 
-      <v-btn
-        color="primary"
-        block
-        size="large"
-        :loading="loading || authState.authLoading.value"
+      <Button
+        class="mt-5 w-full"
+        :disabled="loading || authState.authLoading.value"
         @click="submit"
       >
         {{ t('continue') }}
-      </v-btn>
-    </v-card>
-  </v-container>
+      </Button>
+    </Card>
+  </div>
 </template>
+
+<style scoped>
+.login-shell {
+  min-height: calc(100vh - 72px);
+  display: grid;
+  place-items: center;
+  padding: 16px;
+}
+
+.login-card {
+  width: min(430px, 100%);
+}
+</style>

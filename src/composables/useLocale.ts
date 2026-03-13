@@ -1,11 +1,12 @@
 import { computed, ref } from 'vue';
+import { getStoredString, setStoredString } from '@/lib/safeStorage';
 
 export type AppLocale = 'zh-CN' | 'en-US';
 
 type MessageMap = Record<string, string>;
 
 const LOCALE_KEY = 'video_list_locale';
-const savedLocale = (localStorage.getItem(LOCALE_KEY) as AppLocale) || 'zh-CN';
+const savedLocale = (getStoredString(LOCALE_KEY, 'zh-CN') as AppLocale) || 'zh-CN';
 const locale = ref<AppLocale>(savedLocale === 'en-US' ? 'en-US' : 'zh-CN');
 
 const messages: Record<AppLocale, MessageMap> = {
@@ -432,7 +433,7 @@ function interpolate(template: string, params?: Record<string, string | number>)
 
 function setLocale(next: AppLocale): void {
   locale.value = next;
-  localStorage.setItem(LOCALE_KEY, next);
+  setStoredString(LOCALE_KEY, next);
 }
 
 function t(key: string, params?: Record<string, string | number>): string {

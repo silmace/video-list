@@ -1,8 +1,32 @@
 @import url('https://fonts.googleapis.com/css2?family=Manrope:wght@400;500;600;700;800&family=IBM+Plex+Mono:wght@400;600&display=swap');
 
+@tailwind base;
+@tailwind components;
+@tailwind utilities;
+
 :root {
 	font-family: 'Manrope', 'Segoe UI', sans-serif;
 	color-scheme: light;
+	--background: 39 45% 95%;
+	--foreground: 21 31% 10%;
+	--card: 38 74% 98%;
+	--card-foreground: 21 31% 10%;
+	--popover: 38 74% 98%;
+	--popover-foreground: 21 31% 10%;
+	--primary: 176 77% 26%;
+	--primary-foreground: 0 0% 100%;
+	--secondary: 32 92% 44%;
+	--secondary-foreground: 0 0% 100%;
+	--muted: 36 37% 87%;
+	--muted-foreground: 24 23% 35%;
+	--accent: 176 77% 26%;
+	--accent-foreground: 0 0% 100%;
+	--destructive: 24 89% 42%;
+	--destructive-foreground: 0 0% 100%;
+	--border: 33 35% 72%;
+	--input: 33 35% 72%;
+	--ring: 176 77% 26%;
+	--radius: 0.9rem;
 	--bg-base: #f4efe6;
 	--bg-elevated: #fbf6ee;
 	--bg-accent: #e9dbc7;
@@ -30,6 +54,25 @@
 
 body[data-theme='dark'] {
 	color-scheme: dark;
+	--background: 25 23% 7%;
+	--foreground: 39 55% 90%;
+	--card: 23 19% 13%;
+	--card-foreground: 39 55% 90%;
+	--popover: 23 19% 13%;
+	--popover-foreground: 39 55% 90%;
+	--primary: 171 48% 66%;
+	--primary-foreground: 23 24% 12%;
+	--secondary: 33 89% 65%;
+	--secondary-foreground: 23 24% 12%;
+	--muted: 23 20% 18%;
+	--muted-foreground: 31 22% 66%;
+	--accent: 171 48% 66%;
+	--accent-foreground: 23 24% 12%;
+	--destructive: 28 92% 67%;
+	--destructive-foreground: 23 24% 12%;
+	--border: 30 21% 34%;
+	--input: 30 21% 34%;
+	--ring: 171 48% 66%;
 	--bg-base: #16120f;
 	--bg-elevated: #1d1713;
 	--bg-accent: #2e241d;
@@ -54,6 +97,10 @@ body[data-theme='dark'] {
 
 html {
 	background: var(--bg-base);
+}
+
+* {
+	border-color: hsl(var(--border));
 }
 
 body {
@@ -174,74 +221,6 @@ a {
 	justify-content: flex-end;
 	gap: 10px;
 	flex-wrap: wrap;
-}
-
-.input-shell {
-	display: inline-flex;
-	align-items: center;
-	gap: 10px;
-	padding: 0 14px;
-	min-height: 46px;
-	border-radius: 14px;
-	border: 1px solid var(--border-soft);
-	background: color-mix(in srgb, var(--surface-3) 92%, transparent);
-	color: var(--text-1);
-	box-sizing: border-box;
-	width: 100%;
-}
-
-.input-shell input,
-.input-shell select,
-.input-shell textarea {
-	width: 100%;
-	border: none;
-	background: transparent;
-	color: inherit;
-	outline: none;
-}
-
-.shad-btn {
-	display: inline-flex;
-	align-items: center;
-	justify-content: center;
-	gap: 8px;
-	border: 1px solid var(--border-soft);
-	border-radius: 999px;
-	padding: 10px 14px;
-	background: color-mix(in srgb, var(--surface-2) 94%, transparent);
-	color: var(--text-1);
-	font-weight: 700;
-	cursor: pointer;
-	transition: transform 0.18s ease, border-color 0.18s ease, background 0.18s ease;
-}
-
-.shad-btn:hover {
-	transform: translateY(-1px);
-	border-color: color-mix(in srgb, var(--accent) 34%, var(--border-soft));
-	background: color-mix(in srgb, var(--surface-1) 96%, transparent);
-}
-
-.shad-btn:disabled {
-	opacity: 0.6;
-	cursor: not-allowed;
-	transform: none;
-}
-
-.shad-btn-primary {
-	background: linear-gradient(135deg, var(--accent), color-mix(in srgb, var(--accent) 68%, var(--accent-warm)));
-	border-color: transparent;
-	color: #fff;
-}
-
-.shad-btn-danger {
-	background: color-mix(in srgb, var(--danger) 84%, #fff);
-	border-color: transparent;
-	color: #fff;
-}
-
-.shad-btn-sm {
-	padding: 8px 10px;
-	font-size: 12px;
 }
 
 @media (max-width: 960px) {

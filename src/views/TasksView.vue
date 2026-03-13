@@ -1,11 +1,13 @@
 <script setup lang="ts">
 import { computed, onMounted, onUnmounted, ref } from 'vue';
 import { useRouter } from 'vue-router';
-import { useDisplay } from 'vuetify';
 import { authState } from '../composables/useAuth';
 import type { TaskItem } from '../types';
 import { useLocale } from '../composables/useLocale';
 import { cancelTask as cancelTaskRequest, fetchTasks as loadTasks } from '../services/tasks';
+import { Badge } from '@/components/ui/badge';
+import { Button } from '@/components/ui/button';
+import { Card } from '@/components/ui/card';
 
 const router = useRouter();
 const tasks = ref<TaskItem[]>([]);
@@ -13,21 +15,10 @@ const loading = ref(false);
 const snackbar = ref({ show: false, message: '', color: 'success' });
 let timer: ReturnType<typeof setInterval> | null = null;
 const { t } = useLocale();
-const { smAndDown } = useDisplay();
 
 const activeCount = computed(() =>
   tasks.value.filter((task) => task.status === 'pending' || task.status === 'running').length
 );
-
-const headers = computed(() => [
-  { title: t('type'), key: 'type' },
-  { title: t('status'), key: 'status' },
-  { title: t('progress'), key: 'progress' },
-  { title: t('stage'), key: 'stage' },
-  { title: t('taskDetails'), key: 'message' },
-  { title: t('updated'), key: 'updatedAt' },
-  { title: t('actions'), key: 'actions', sortable: false },
-]);
 
 const statusLabel = (status: TaskItem['status']) => t(`status_${status}`);
 
@@ -97,6 +88,32 @@ const taskDetailText = (task: TaskItem) => {
   return task.message;
 };
 
+const statusVariant = (status: TaskItem['status']) => {
+  if (status === 'success') {
+    return 'success';
+  }
+  if (status === 'failed') {
+    return 'destructive';
+  }
+  if (status === 'canceled') {
+    return 'secondary';
+  }
+  return 'default';
+};
+
+const progressClass = (status: TaskItem['status']) => {
+  if (status === 'success') {
+    return 'bg-emerald-600';
+  }
+  if (status === 'failed') {
+    return 'bg-rose-600';
+  }
+  if (status === 'canceled') {
+    return 'bg-amber-500';
+  }
+  return 'bg-[var(--accent)]';
+};
+
 const showSnackbar = (message: string, color: string) => {
   snackbar.value = { show: true, message, color };
 };
@@ -145,210 +162,103 @@ onUnmounted(() => {
 </script>
 
 <template>
-  <v-container class="app-page">
-    <v-card class="glass-panel pa-4 mb-4">
-      <div class="d-flex align-center">
+  <div class="app-page grid gap-4">
+    <Card class="glass-panel p-4">
+      <div class="flex flex-wrap items-center justify-between gap-3">
         <div>
-          <div class="text-h5">{{ t('taskCenter') }}</div>
-          <div class="text-medium-emphasis">{{ t('activeTasks', { count: activeCount }) }}</div>
+          <h1 class="text-2xl font-extrabold tracking-tight">{{ t('taskCenter') }}</h1>
+          <p class="text-sm text-[var(--text-2)]">{{ t('activeTasks', { count: activeCount }) }}</p>
         </div>
-        <v-spacer />
-        <v-btn color="primary" variant="tonal" @click="fetchTasks">{{ t('refresh') }}</v-btn>
+        <Button variant="outline" @click="fetchTasks">{{ t('refresh') }}</Button>
       </div>
-    </v-card>
+    </Card>
 
-    <v-card class="glass-panel pa-2">
-      <div v-if="smAndDown" class="task-mobile-list">
-        <v-card
-          v-for="item in tasks"
-          :key="item.id"
-          variant="tonal"
-          class="task-mobile-card"
-        >
-          <v-card-text>
-            <div class="mobile-row">
-              <v-chip size="small" variant="outlined">{{ taskTypeLabel(item.type) }}</v-chip>
-              <v-chip
-                size="small"
-                :color="
-                  item.status === 'success'
-                    ? 'success'
-                    : item.status === 'failed'
-                      ? 'error'
-                      : item.status === 'canceled'
-                        ? 'warning'
-                        : 'info'
-                "
-                variant="tonal"
-              >
-                {{ statusLabel(item.status) }}
-              </v-chip>
-            </div>
-            <div class="task-mobile-stage">{{ taskStageLabel(item.stage) }}</div>
-            <v-progress-linear :model-value="item.progress" height="8" rounded class="my-2" />
-            <div class="task-detail-cell">
-              <div>{{ taskDetailText(item) }}</div>
-              <div v-if="item.currentItem" class="task-detail-sub">{{ item.currentItem }}</div>
-            </div>
-            <div class="task-mobile-updated">{{ new Date(item.updatedAt).toLocaleString() }}</div>
-            <div class="mobile-row mt-2">
-              <v-btn
-                v-if="item.status === 'running' || item.status === 'pending'"
-                color="warning"
-                variant="text"
-                size="small"
-                @click="cancelTask(item.id)"
-              >
-                {{ t('cancel') }}
-              </v-btn>
-              <v-btn
-                v-if="item.outputPath"
-                color="primary"
-                variant="text"
-                size="small"
-                @click="openOutputFolder(item.outputPath)"
-              >
-                {{ t('openOutput') }}
-              </v-btn>
-            </div>
-          </v-card-text>
-        </v-card>
-
-        <div v-if="!loading && tasks.length === 0" class="task-empty">
-          {{ t('noTasksYet') }}
-        </div>
+    <Card class="glass-panel p-3">
+      <div v-if="loading && tasks.length === 0" class="p-6 text-sm text-[var(--text-2)]">
+        {{ t('loadingFiles') }}
       </div>
 
-      <v-data-table
-        v-else
-        :items="tasks"
-        :loading="loading"
-        :headers="headers"
-        item-value="id"
-      >
-        <template #item.status="{ item }">
-          <v-chip
-            size="small"
-            :color="
-              item.status === 'success'
-                ? 'success'
-                : item.status === 'failed'
-                  ? 'error'
-                  : item.status === 'canceled'
-                    ? 'warning'
-                    : 'info'
-            "
-            variant="tonal"
-          >
-            {{ statusLabel(item.status) }}
-          </v-chip>
-        </template>
+      <div v-else-if="tasks.length === 0" class="p-6 text-sm text-[var(--text-2)]">
+        {{ t('noTasksYet') }}
+      </div>
 
-        <template #item.type="{ item }">
-          <v-chip size="small" variant="outlined">
-            {{ taskTypeLabel(item.type) }}
-          </v-chip>
-        </template>
-
-        <template #item.stage="{ item }">
-          <span class="stage-label">{{ taskStageLabel(item.stage) }}</span>
-        </template>
-
-        <template #item.message="{ item }">
-          <div class="task-detail-cell">
-            <div>{{ taskDetailText(item) }}</div>
-            <div v-if="item.currentItem" class="task-detail-sub">{{ item.currentItem }}</div>
+      <div v-else class="grid gap-3">
+        <article v-for="item in tasks" :key="item.id" class="task-card rounded-xl border border-[var(--border-soft)] p-4">
+          <div class="flex flex-wrap items-center gap-2">
+            <Badge variant="outline">{{ taskTypeLabel(item.type) }}</Badge>
+            <Badge :variant="statusVariant(item.status)">{{ statusLabel(item.status) }}</Badge>
+            <span class="ml-auto text-xs text-[var(--text-3)]">{{ new Date(item.updatedAt).toLocaleString() }}</span>
           </div>
-        </template>
 
-        <template #item.progress="{ item }">
-          <v-progress-linear :model-value="item.progress" height="8" rounded />
-        </template>
+          <div class="mt-2 text-xs font-semibold uppercase tracking-wide text-[var(--accent)]">
+            {{ taskStageLabel(item.stage) }}
+          </div>
 
-        <template #item.updatedAt="{ item }">
-          {{ new Date(item.updatedAt).toLocaleString() }}
-        </template>
+          <div class="mt-2 h-2 w-full overflow-hidden rounded-full bg-[var(--surface-3)]">
+            <div class="h-full transition-all" :class="progressClass(item.status)" :style="{ width: `${item.progress}%` }" />
+          </div>
 
-        <template #item.actions="{ item }">
-          <div class="d-flex ga-2">
-            <v-btn
+          <div class="mt-3 text-sm leading-relaxed text-[var(--text-1)]">
+            {{ taskDetailText(item) }}
+          </div>
+          <div v-if="item.currentItem" class="mt-1 break-all text-xs text-[var(--text-3)]">
+            {{ item.currentItem }}
+          </div>
+
+          <div class="mt-3 flex flex-wrap gap-2">
+            <Button
               v-if="item.status === 'running' || item.status === 'pending'"
-              color="warning"
-              variant="text"
+              variant="secondary"
+              size="sm"
               @click="cancelTask(item.id)"
             >
               {{ t('cancel') }}
-            </v-btn>
-            <v-btn
+            </Button>
+            <Button
               v-if="item.outputPath"
-              color="primary"
-              variant="text"
+              variant="outline"
+              size="sm"
               @click="openOutputFolder(item.outputPath)"
             >
               {{ t('openOutput') }}
-            </v-btn>
+            </Button>
           </div>
-        </template>
-      </v-data-table>
-    </v-card>
+        </article>
+      </div>
+    </Card>
 
-    <v-snackbar v-model="snackbar.show" :color="snackbar.color">
+    <div v-if="snackbar.show" class="snackbar" :class="`snackbar-${snackbar.color}`">
       {{ snackbar.message }}
-    </v-snackbar>
-  </v-container>
+    </div>
+  </div>
 </template>
 
 <style scoped>
-.stage-label {
-  color: rgb(var(--v-theme-primary));
+.task-card {
+  background: color-mix(in srgb, var(--surface-2) 88%, transparent);
 }
 
-.task-detail-cell {
-  max-width: 460px;
-  white-space: normal;
-  line-height: 1.35;
+.snackbar {
+  position: fixed;
+  right: 16px;
+  bottom: 16px;
+  z-index: 40;
+  border-radius: 10px;
+  padding: 10px 12px;
+  color: #fff;
+  box-shadow: var(--shadow-lg);
 }
 
-.task-detail-sub {
-  margin-top: 3px;
-  font-size: 12px;
-  color: rgba(100, 116, 139, 0.95);
-  word-break: break-all;
+.snackbar-success {
+  background: #166534;
 }
 
-.task-mobile-list {
-  display: grid;
-  gap: 10px;
-  padding: 6px;
+.snackbar-error,
+.snackbar-warning {
+  background: #b45309;
 }
 
-.task-mobile-card {
-  border-radius: 14px;
-}
-
-.mobile-row {
-  display: flex;
-  align-items: center;
-  justify-content: space-between;
-  gap: 8px;
-  flex-wrap: wrap;
-}
-
-.task-mobile-stage {
-  margin-top: 8px;
-  color: rgb(var(--v-theme-primary));
-  font-size: 12px;
-}
-
-.task-mobile-updated {
-  margin-top: 8px;
-  color: rgba(100, 116, 139, 0.95);
-  font-size: 12px;
-}
-
-.task-empty {
-  padding: 16px 10px;
-  color: rgba(100, 116, 139, 0.95);
-  text-align: center;
+.snackbar-info {
+  background: #0f766e;
 }
 </style>

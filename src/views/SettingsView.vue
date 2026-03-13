@@ -6,6 +6,9 @@ import { useFileVisuals } from '../composables/useFileVisuals';
 import type { VideoCodecOption } from '../types';
 import { fetchSettings, updateSettings } from '../services/settings';
 import { fetchVideoOptions } from '../services/video';
+import { Badge } from '@/components/ui/badge';
+import { Button } from '@/components/ui/button';
+import { Card } from '@/components/ui/card';
 
 const loading = ref(false);
 const saving = ref(false);
@@ -37,6 +40,12 @@ const onLocaleChange = (value: AppLocale | null) => {
   if (value) {
     setLocale(value);
   }
+};
+
+const onLocaleChangeFromEvent = (event: Event) => {
+  const target = event.target as HTMLSelectElement;
+  const value = target.value as AppLocale;
+  onLocaleChange(value);
 };
 
 const createCustomTag = () => {
@@ -121,162 +130,194 @@ onMounted(async () => {
 </script>
 
 <template>
-  <v-container class="app-page">
-    <v-card class="glass-panel pa-4">
-      <v-card-title class="text-h5">{{ t('settingsTitle') }}</v-card-title>
-      <v-card-subtitle class="mb-4">{{ t('settingsSubtitle') }}</v-card-subtitle>
+  <div class="app-page grid gap-4">
+    <Card class="glass-panel p-4 md:p-6">
+      <h1 class="text-2xl font-extrabold tracking-tight">{{ t('settingsTitle') }}</h1>
+      <p class="mt-1 text-sm text-[var(--text-2)]">{{ t('settingsSubtitle') }}</p>
 
-      <v-progress-linear v-if="loading" indeterminate color="primary" class="mb-4" />
-
-      <v-row>
-        <v-col cols="12" md="5">
-          <v-text-field v-model="baseDir" :label="t('baseDir')" variant="outlined" />
-        </v-col>
-        <v-col cols="12" md="3">
-          <v-text-field
-            v-model="videoOutputDir"
-            :label="t('videoOutputDir')"
-            :hint="t('videoOutputDirHint')"
-            persistent-hint
-            variant="outlined"
-          />
-        </v-col>
-        <v-col cols="12" md="2">
-          <v-text-field v-model="taskPollIntervalMs" type="number" :label="t('taskPollMs')" variant="outlined" />
-        </v-col>
-        <v-col cols="12" md="2">
-          <v-select
-            :model-value="locale"
-            :items="localeOptions"
-            item-title="title"
-            item-value="value"
-            :label="t('language')"
-            variant="outlined"
-            @update:model-value="onLocaleChange"
-          />
-        </v-col>
-        <v-col cols="12" md="2" class="d-flex align-center">
-          <v-switch
-            v-model="showHiddenItems"
-            color="primary"
-            :label="t('includeHiddenInList')"
-            hide-details
-            inset
-          />
-        </v-col>
-      </v-row>
-
-      <v-row>
-        <v-col cols="12" md="5">
-          <v-text-field v-model="logDir" :label="t('logDir')" variant="outlined" />
-        </v-col>
-        <v-col cols="12" md="3">
-          <v-select
-            v-model="logLevel"
-            :items="['debug', 'info', 'warn', 'error']"
-            :label="t('logLevel')"
-            variant="outlined"
-          />
-        </v-col>
-        <v-col cols="12" md="2">
-          <v-text-field v-model="logRotationHours" type="number" :label="t('rotateHours')" variant="outlined" />
-        </v-col>
-        <v-col cols="12" md="2">
-          <v-text-field v-model="logMaxAgeDays" type="number" :label="t('keepDays')" variant="outlined" />
-        </v-col>
-      </v-row>
-
-      <v-divider class="my-4" />
-      <div class="text-subtitle-1 mb-2">{{ t('passwordProtection') }}</div>
-      <v-row>
-        <v-col cols="12" md="6" v-if="authEnabled">
-          <v-text-field
-            v-model="currentPassword"
-            type="password"
-            :label="t('currentPassword')"
-            variant="outlined"
-          />
-        </v-col>
-        <v-col cols="12" md="6">
-          <v-text-field
-            v-model="newPassword"
-            type="password"
-            :label="t('newPasswordLabel')"
-            variant="outlined"
-            :hint="t('passwordHint')"
-            persistent-hint
-          />
-        </v-col>
-      </v-row>
-
-      <v-card-actions class="px-0 pt-2">
-        <v-spacer />
-        <v-btn color="primary" :loading="saving" @click="saveSettings">{{ t('saveSettings') }}</v-btn>
-      </v-card-actions>
-
-      <v-divider class="my-6" />
-      <div class="text-subtitle-1 mb-2">{{ t('colorTagsTitle') }}</div>
-      <div class="text-medium-emphasis mb-4">{{ t('colorTagsSubtitle') }}</div>
-
-      <v-row>
-        <v-col cols="12" md="3">
-          <v-text-field v-model="newTagLabel" :label="t('tagLabel')" variant="outlined" />
-        </v-col>
-        <v-col cols="12" md="5">
-          <v-text-field
-            v-model="newTagPattern"
-            :label="t('tagPattern')"
-            :hint="t('tagPatternHint')"
-            persistent-hint
-            variant="outlined"
-          />
-        </v-col>
-        <v-col cols="8" md="2">
-          <v-text-field v-model="newTagColor" :label="t('tagColor')" variant="outlined" />
-        </v-col>
-        <v-col cols="4" md="2" class="d-flex align-center">
-          <input v-model="newTagColor" type="color" class="color-input" />
-          <v-btn color="primary" variant="tonal" class="ml-3" @click="createCustomTag">{{ t('create') }}</v-btn>
-        </v-col>
-      </v-row>
-
-      <div class="d-flex flex-wrap ga-2 mb-3">
-        <v-chip
-          v-for="tag in tagList"
-          :key="tag.id"
-          closable
-          :style="{ borderColor: tag.color, color: tag.color }"
-          variant="outlined"
-          @click:close="removeTag(tag.id)"
-        >
-          {{ tag.label }} · {{ tag.pattern }}
-        </v-chip>
+      <div v-if="loading" class="mt-4 h-2 w-full overflow-hidden rounded-full bg-[var(--surface-3)]">
+        <div class="h-full w-1/3 animate-pulse bg-[var(--accent)]" />
       </div>
 
-      <v-btn variant="text" color="warning" @click="resetTags">{{ t('resetDefaultTags') }}</v-btn>
+      <section class="settings-grid mt-5">
+        <label class="field-shell md:col-span-2">
+          <span>{{ t('baseDir') }}</span>
+          <input v-model="baseDir" type="text">
+        </label>
+        <label class="field-shell md:col-span-1">
+          <span>{{ t('videoOutputDir') }}</span>
+          <input v-model="videoOutputDir" type="text">
+          <small>{{ t('videoOutputDirHint') }}</small>
+        </label>
+        <label class="field-shell">
+          <span>{{ t('taskPollMs') }}</span>
+          <input v-model.number="taskPollIntervalMs" type="number" min="500" step="100">
+        </label>
+        <label class="field-shell">
+          <span>{{ t('language') }}</span>
+          <select :value="locale" @change="onLocaleChangeFromEvent">
+            <option v-for="option in localeOptions" :key="option.value" :value="option.value">{{ option.title }}</option>
+          </select>
+        </label>
+        <label class="checkbox-shell md:col-span-2">
+          <input v-model="showHiddenItems" type="checkbox">
+          <span>{{ t('includeHiddenInList') }}</span>
+        </label>
+      </section>
 
-      <v-divider class="my-6" />
-      <div class="text-subtitle-1 mb-2">{{ t('encoderCapabilitiesTitle') }}</div>
-      <div class="text-medium-emphasis mb-4">{{ t('encoderCapabilitiesSubtitle') }}</div>
-      <div class="d-flex flex-wrap ga-2">
-        <v-chip
-          v-for="codec in codecOptions"
-          :key="codec.id"
-          :color="codec.available ? 'success' : 'warning'"
-          variant="tonal"
-        >
-          {{ codec.label }} · {{ codec.available ? t('available') : t('unavailable') }}
-        </v-chip>
+      <section class="settings-grid mt-4">
+        <label class="field-shell md:col-span-2">
+          <span>{{ t('logDir') }}</span>
+          <input v-model="logDir" type="text">
+        </label>
+        <label class="field-shell">
+          <span>{{ t('logLevel') }}</span>
+          <select v-model="logLevel">
+            <option value="debug">debug</option>
+            <option value="info">info</option>
+            <option value="warn">warn</option>
+            <option value="error">error</option>
+          </select>
+        </label>
+        <label class="field-shell">
+          <span>{{ t('rotateHours') }}</span>
+          <input v-model.number="logRotationHours" type="number" min="1">
+        </label>
+        <label class="field-shell">
+          <span>{{ t('keepDays') }}</span>
+          <input v-model.number="logMaxAgeDays" type="number" min="1">
+        </label>
+      </section>
+
+      <section class="mt-6 grid gap-3">
+        <h2 class="text-lg font-bold">{{ t('passwordProtection') }}</h2>
+        <div class="settings-grid">
+          <label v-if="authEnabled" class="field-shell md:col-span-2">
+            <span>{{ t('currentPassword') }}</span>
+            <input v-model="currentPassword" type="password">
+          </label>
+          <label class="field-shell md:col-span-2">
+            <span>{{ t('newPasswordLabel') }}</span>
+            <input v-model="newPassword" type="password">
+            <small>{{ t('passwordHint') }}</small>
+          </label>
+        </div>
+      </section>
+
+      <div class="mt-5 flex justify-end">
+        <Button :disabled="saving" @click="saveSettings">{{ t('saveSettings') }}</Button>
       </div>
-    </v-card>
 
-    <v-snackbar v-model="snackbar.show" :color="snackbar.color">
+      <hr class="my-6 border-[var(--border-soft)]">
+
+      <section class="grid gap-3">
+        <h2 class="text-lg font-bold">{{ t('colorTagsTitle') }}</h2>
+        <p class="text-sm text-[var(--text-2)]">{{ t('colorTagsSubtitle') }}</p>
+
+        <div class="settings-grid">
+          <label class="field-shell">
+            <span>{{ t('tagLabel') }}</span>
+            <input v-model="newTagLabel" type="text">
+          </label>
+          <label class="field-shell md:col-span-2">
+            <span>{{ t('tagPattern') }}</span>
+            <input v-model="newTagPattern" type="text">
+            <small>{{ t('tagPatternHint') }}</small>
+          </label>
+          <label class="field-shell">
+            <span>{{ t('tagColor') }}</span>
+            <input v-model="newTagColor" type="text">
+          </label>
+          <div class="color-row">
+            <input v-model="newTagColor" type="color" class="color-input">
+            <Button variant="outline" @click="createCustomTag">{{ t('create') }}</Button>
+          </div>
+        </div>
+
+        <div class="flex flex-wrap gap-2">
+          <button
+            v-for="tag in tagList"
+            :key="tag.id"
+            type="button"
+            class="tag-chip"
+            :style="{ borderColor: tag.color, color: tag.color }"
+            @click="removeTag(tag.id)"
+          >
+            {{ tag.label }} · {{ tag.pattern }}
+          </button>
+        </div>
+
+        <Button variant="secondary" class="w-fit" @click="resetTags">{{ t('resetDefaultTags') }}</Button>
+      </section>
+
+      <hr class="my-6 border-[var(--border-soft)]">
+
+      <section class="grid gap-3">
+        <h2 class="text-lg font-bold">{{ t('encoderCapabilitiesTitle') }}</h2>
+        <p class="text-sm text-[var(--text-2)]">{{ t('encoderCapabilitiesSubtitle') }}</p>
+        <div class="flex flex-wrap gap-2">
+          <Badge
+            v-for="codec in codecOptions"
+            :key="codec.id"
+            :variant="codec.available ? 'success' : 'secondary'"
+          >
+            {{ codec.label }} · {{ codec.available ? t('available') : t('unavailable') }}
+          </Badge>
+        </div>
+      </section>
+    </Card>
+
+    <div v-if="snackbar.show" class="snackbar" :class="`snackbar-${snackbar.color}`">
       {{ snackbar.message }}
-    </v-snackbar>
-  </v-container>
+    </div>
+  </div>
 </template>
 
 <style scoped>
+.settings-grid {
+  display: grid;
+  gap: 12px;
+  grid-template-columns: repeat(1, minmax(0, 1fr));
+}
+
+.field-shell {
+  display: grid;
+  gap: 6px;
+  font-size: 13px;
+  font-weight: 700;
+  color: var(--text-2);
+}
+
+.field-shell input,
+.field-shell select {
+  width: 100%;
+  min-height: 40px;
+  border-radius: 10px;
+  border: 1px solid var(--border-soft);
+  background: color-mix(in srgb, var(--surface-3) 90%, transparent);
+  padding: 8px 10px;
+  color: var(--text-1);
+}
+
+.field-shell small {
+  font-weight: 500;
+  color: var(--text-3);
+}
+
+.checkbox-shell {
+  display: inline-flex;
+  align-items: center;
+  gap: 10px;
+  color: var(--text-2);
+  font-weight: 700;
+}
+
+.color-row {
+  display: flex;
+  align-items: end;
+  gap: 10px;
+}
+
 .color-input {
   width: 38px;
   height: 38px;
@@ -284,5 +325,45 @@ onMounted(async () => {
   border: 1px solid rgba(148, 163, 184, 0.45);
   padding: 2px;
   background: transparent;
+}
+
+.tag-chip {
+  border: 1px solid var(--border-soft);
+  border-radius: 999px;
+  padding: 6px 10px;
+  background: transparent;
+  font-size: 12px;
+  font-weight: 700;
+  cursor: pointer;
+}
+
+.snackbar {
+  position: fixed;
+  right: 16px;
+  bottom: 16px;
+  z-index: 40;
+  border-radius: 10px;
+  padding: 10px 12px;
+  color: #fff;
+  box-shadow: var(--shadow-lg);
+}
+
+.snackbar-success {
+  background: #166534;
+}
+
+.snackbar-error,
+.snackbar-warning {
+  background: #b45309;
+}
+
+.snackbar-info {
+  background: #0f766e;
+}
+
+@media (min-width: 880px) {
+  .settings-grid {
+    grid-template-columns: repeat(4, minmax(0, 1fr));
+  }
 }
 </style>
