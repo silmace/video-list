@@ -73,7 +73,7 @@ func resolveConfigPath(override string) string {
 	return filepath.Join(home, ".video-list", "config.yaml")
 }
 
-func loadOrInitConfig(path string, baseDirOverride string) (AppConfig, error) {
+func loadOrInitConfig(path string) (AppConfig, error) {
 	cfg := defaultConfig()
 
 	if err := os.MkdirAll(filepath.Dir(path), 0700); err != nil {
@@ -86,10 +86,6 @@ func loadOrInitConfig(path string, baseDirOverride string) (AppConfig, error) {
 				return cfg, fmt.Errorf("invalid YAML config: %w", err)
 			}
 		}
-	}
-
-	if baseDirOverride != "" {
-		cfg.BaseDir = baseDirOverride
 	}
 
 	baseDir, err := normalizeAndValidateDir(cfg.BaseDir)
@@ -192,7 +188,6 @@ func decodeJSONBody(w http.ResponseWriter, r *http.Request, dst any) error {
 
 func publicConfig(cfg AppConfig) PublicConfig {
 	return PublicConfig{
-		BaseDir:            cfg.BaseDir,
 		VideoOutputDir:     cfg.VideoOutputDir,
 		ShowHiddenItems:    cfg.ShowHiddenItems,
 		AuthEnabled:        cfg.PasswordHash != "",
@@ -218,17 +213,6 @@ func handleSettings(w http.ResponseWriter, r *http.Request) {
 
 		cfg := getConfig()
 
-		if req.BaseDir != nil {
-			normalized, err := normalizeAndValidateDir(*req.BaseDir)
-			if err != nil {
-				writeError(w, http.StatusBadRequest, err.Error())
-				return
-			}
-			cfg.BaseDir = normalized
-			if req.VideoOutputDir == nil {
-				cfg.VideoOutputDir = filepath.Join(cfg.BaseDir, "output")
-			}
-		}
 		if req.VideoOutputDir != nil {
 			resolvedOutputDir, err := normalizeOutputDir(cfg.BaseDir, *req.VideoOutputDir)
 			if err != nil {

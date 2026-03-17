@@ -1,5 +1,4 @@
 export interface PublicSettings {
-  baseDir: string;
   videoOutputDir: string;
   showHiddenItems: boolean;
   authEnabled: boolean;
@@ -16,7 +15,6 @@ export interface SettingsResponse {
 }
 
 export interface SettingsUpdatePayload {
-  baseDir: string;
   videoOutputDir: string;
   showHiddenItems: boolean;
   logDir: string;

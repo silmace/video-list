@@ -28,7 +28,7 @@ const (
 )
 
 type AppConfig struct {
-	BaseDir            string `json:"baseDir" yaml:"baseDir"`
+	BaseDir            string `json:"-" yaml:"baseDir"` // Internal only, not exposed via API
 	VideoOutputDir     string `json:"videoOutputDir" yaml:"videoOutputDir"`
 	ShowHiddenItems    bool   `json:"showHiddenItems" yaml:"showHiddenItems"`
 	PasswordHash       string `json:"passwordHash,omitempty" yaml:"passwordHash,omitempty"`
@@ -40,7 +40,6 @@ type AppConfig struct {
 }
 
 type PublicConfig struct {
-	BaseDir            string `json:"baseDir"`
 	VideoOutputDir     string `json:"videoOutputDir"`
 	ShowHiddenItems    bool   `json:"showHiddenItems"`
 	AuthEnabled        bool   `json:"authEnabled"`
@@ -52,7 +51,6 @@ type PublicConfig struct {
 }
 
 type SettingsUpdateRequest struct {
-	BaseDir            *string `json:"baseDir"`
 	VideoOutputDir     *string `json:"videoOutputDir"`
 	ShowHiddenItems    *bool   `json:"showHiddenItems"`
 	LogDir             *string `json:"logDir"`

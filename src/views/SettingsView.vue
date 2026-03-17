@@ -11,7 +11,6 @@ const loading = ref(false);
 const saving = ref(false);
 const snackbar = ref({ show: false, message: '', color: 'success' });
 
-const baseDir = ref('');
 const videoOutputDir = ref('');
 const showHiddenItems = ref(false);
 const logDir = ref('');
@@ -63,7 +62,6 @@ const loadSettings = async () => {
   loading.value = true;
   try {
     const settings = await fetchSettings();
-    baseDir.value = settings.baseDir;
     videoOutputDir.value = settings.videoOutputDir;
     showHiddenItems.value = settings.showHiddenItems;
     logDir.value = settings.logDir;
@@ -83,7 +81,6 @@ const saveSettings = async () => {
   saving.value = true;
   try {
     await updateSettings({
-      baseDir: baseDir.value,
       videoOutputDir: videoOutputDir.value,
       showHiddenItems: showHiddenItems.value,
       logDir: logDir.value,
@@ -130,9 +127,6 @@ onMounted(async () => {
 
       <v-row>
         <v-col cols="12" md="5">
-          <v-text-field v-model="baseDir" :label="t('baseDir')" variant="outlined" />
-        </v-col>
-        <v-col cols="12" md="3">
           <v-text-field
             v-model="videoOutputDir"
             :label="t('videoOutputDir')"
@@ -141,7 +135,7 @@ onMounted(async () => {
             variant="outlined"
           />
         </v-col>
-        <v-col cols="12" md="2">
+        <v-col cols="12" md="3">
           <v-text-field v-model="taskPollIntervalMs" type="number" :label="t('taskPollMs')" variant="outlined" />
         </v-col>
         <v-col cols="12" md="2">
