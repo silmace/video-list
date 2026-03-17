@@ -2,6 +2,8 @@
 
 Video List is a web-based file manager with media streaming and video editing capabilities. It's designed for remote deployment on NAS servers and provides secure, password-protected access to manage and edit video files.
 
+<img src="image.png" alt="项目截图" width="900" />
+
 **Key Features:**
 - 🎥 Web-based video file manager and streamer
 - ✏️ Video editing and batch processing support
