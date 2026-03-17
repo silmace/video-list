@@ -19,7 +19,7 @@ Video List is a web-based file manager with media streaming and video editing ca
 
 ```bash
 # Download and run the installation script
-sudo bash install.sh [version]
+sudo bash install.sh
 
 # Or install manually:
 # 1. Download binary from releases

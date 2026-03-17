@@ -1,0 +1,174 @@
+name: Validate Installer And Dockerfile
+
+on:
+  push:
+    branches:
+      - main
+      - review
+  pull_request:
+
+permissions:
+  contents: read
+
+jobs:
+  test-install-script:
+    runs-on: ubuntu-latest
+    container:
+      image: ubuntu:24.04
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Install test dependencies
+        run: |
+          apt-get update
+          DEBIAN_FRONTEND=noninteractive apt-get install -y \
+            bash \
+            ca-certificates \
+            coreutils \
+            grep \
+            sed \
+            shellcheck
+
+      - name: Bash syntax check
+        run: bash -n install.sh
+
+      - name: Shellcheck
+        run: shellcheck install.sh
+
+      - name: Prepare mock commands for offline/systemd-less test
+        run: |
+          set -euo pipefail
+          mkdir -p /tmp/fakebin
+
+          # Mock systemctl so script can run in CI container without real systemd.
+          cat > /tmp/fakebin/systemctl << 'EOF'
+          #!/usr/bin/env bash
+          set -euo pipefail
+          echo "[mock systemctl] $*"
+          exit 0
+          EOF
+          chmod +x /tmp/fakebin/systemctl
+
+          # Mock curl: create a fake binary at -o target.
+          cat > /tmp/fakebin/curl << 'EOF'
+          #!/usr/bin/env bash
+          set -euo pipefail
+          out=""
+          while [ $# -gt 0 ]; do
+            case "$1" in
+              -o)
+                out="$2"
+                shift 2
+                ;;
+              *)
+                shift
+                ;;
+            esac
+          done
+          if [ -z "$out" ]; then
+            echo "mock curl: missing -o output path" >&2
+            exit 1
+          fi
+          mkdir -p "$(dirname "$out")"
+          cat > "$out" << 'BIN'
+          #!/usr/bin/env sh
+          echo "video-list mock binary"
+          BIN
+          chmod +x "$out"
+          EOF
+          chmod +x /tmp/fakebin/curl
+
+      - name: Run installer script in CI sandbox
+        env:
+          PATH: /tmp/fakebin:/usr/local/sbin:/usr/local/bin:/usr/sbin:/usr/bin:/sbin:/bin
+        run: |
+          set -euo pipefail
+          bash install.sh latest
+
+      - name: Validate install artifacts and permissions
+        run: |
+          set -euo pipefail
+
+          test -x /opt/video-list/video-list
+          test -f /etc/video-list/config.yaml
+          test -f /etc/systemd/system/video-list.service
+          test -d /var/log/video-list
+
+          # Config file permission should be 600.
+          [ "$(stat -c '%a' /etc/video-list/config.yaml)" = "600" ]
+
+          # Service hardening directives should exist.
+          grep -q '^NoNewPrivileges=true$' /etc/systemd/system/video-list.service
+          grep -q '^ProtectSystem=strict$' /etc/systemd/system/video-list.service
+          grep -q '^ProtectHome=true$' /etc/systemd/system/video-list.service
+          grep -q '^RestrictSUIDSGID=true$' /etc/systemd/system/video-list.service
+
+  test-dockerfile:
+    runs-on: ubuntu-latest
+    strategy:
+      fail-fast: false
+      matrix:
+        platform:
+          - linux/amd64
+          - linux/arm64
+          - linux/arm/v7
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Hadolint
+        uses: hadolint/hadolint-action@v3.1.0
+        with:
+          dockerfile: Dockerfile
+
+      - name: Set up QEMU
+        uses: docker/setup-qemu-action@v3
+
+      - name: Set up Docker Buildx
+        uses: docker/setup-buildx-action@v3
+
+      - name: Build image for target platform
+        run: |
+          set -euo pipefail
+
+          # Only amd64 is loaded and smoke-run; other arches are build-validated.
+          if [ "${{ matrix.platform }}" = "linux/amd64" ]; then
+            docker buildx build \
+              --platform "${{ matrix.platform }}" \
+              --load \
+              -t video-list:test-amd64 \
+              .
+          else
+            docker buildx build \
+              --platform "${{ matrix.platform }}" \
+              --progress=plain \
+              --output=type=cacheonly \
+              .
+          fi
+
+      - name: Smoke test container (amd64 only)
+        if: matrix.platform == 'linux/amd64'
+        run: |
+          set -euo pipefail
+          docker run -d --rm --name video-list-test -p 3001:3001 video-list:test-amd64
+
+          ok=0
+          for i in $(seq 1 45); do
+            if curl -fsS http://127.0.0.1:3001/api/auth/status >/dev/null; then
+              ok=1
+              break
+            fi
+            sleep 1
+          done
+
+          if [ "$ok" -ne 1 ]; then
+            echo "Container did not become healthy in time"
+            docker logs video-list-test || true
+            exit 1
+          fi
+
+          docker logs video-list-test | tail -n 100 || true
+          docker stop video-list-test
