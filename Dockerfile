@@ -21,7 +21,7 @@ COPY public ./public
 RUN npm run build
 
 # Stage 2: Build Go backend for multiple architectures
-FROM golang:1.21-alpine AS backend-builder
+FROM golang:1.24-alpine AS backend-builder
 
 WORKDIR /build
 
@@ -32,7 +32,7 @@ RUN apk add --no-cache git ca-certificates tzdata
 COPY go.mod go.sum ./
 
 # Download dependencies - this captures build args
-ARG TARGETARCH
+ARG TARGETARCH=amd64
 ARG TARGETVARIANT
 
 # Download dependencies

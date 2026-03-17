@@ -68,8 +68,17 @@ check_dependencies() {
 detect_architecture() {
     log_info "Detecting system architecture..."
     
-    local arch=$(uname -m)
-    local os=$(uname -s)
+    local arch
+    local os
+
+    arch="$(uname -m)" || {
+        log_error "Failed to detect architecture"
+        exit 1
+    }
+    os="$(uname -s)" || {
+        log_error "Failed to detect operating system"
+        exit 1
+    }
     
     # Validate operating system
     if [ "$os" != "Linux" ]; then
