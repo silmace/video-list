@@ -20,15 +20,13 @@ import (
 )
 
 func Start(embeddedFiles embed.FS) {
-	var baseDirOverride string
 	var cfgPathOverride string
 
-	flag.StringVar(&baseDirOverride, "baseDir", "", "Base directory override")
 	flag.StringVar(&cfgPathOverride, "config", "", "Config file path")
 	flag.Parse()
 
 	appConfigPath = resolveConfigPath(cfgPathOverride)
-	cfg, err := loadOrInitConfig(appConfigPath, baseDirOverride)
+	cfg, err := loadOrInitConfig(appConfigPath)
 	if err != nil {
 		panic(err)
 	}

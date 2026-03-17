@@ -1,0 +1,45 @@
+version: '3.9'
+
+services:
+  video-list:
+    build:
+      context: .
+      dockerfile: Dockerfile
+      # For manual multi-platform builds use buildx:
+      # docker buildx build --platform linux/amd64,linux/arm64,linux/arm/v7 -t video-list .
+    container_name: video-list
+    restart: unless-stopped
+    ports:
+      - "3001:3001"
+    environment:
+      TZ: UTC
+    volumes:
+      # Config volume - for persistent configuration
+      - video-list-config:/app/config
+      # Logs volume - for persistent logging
+      - video-list-logs:/app/logs
+      # Video directory - adjust path as needed
+      # - /home/user/Videos:/videos:ro
+    healthcheck:
+      test: ["CMD", "curl", "-f", "http://localhost:3001/api/auth/status"]
+      interval: 30s
+      timeout: 3s
+      retries: 3
+      start_period: 10s
+    security_opt:
+      - no-new-privileges=true
+    read_only_root_filesystem: true
+    tmpfs:
+      - /tmp:noexec,nosuid,nodev
+    networks:
+      - video-list-network
+
+networks:
+  video-list-network:
+    driver: bridge
+
+volumes:
+  video-list-config:
+    driver: local
+  video-list-logs:
+    driver: local

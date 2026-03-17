@@ -4,6 +4,7 @@ import (
 	"net/http/httptest"
 	"os"
 	"path/filepath"
+	"runtime"
 	"strings"
 	"testing"
 )
@@ -46,23 +47,24 @@ func TestDecodeJSONBodyStrictParsing(t *testing.T) {
 func TestSaveAndLoadConfigYaml(t *testing.T) {
 	tempRoot := t.TempDir()
 	configPath := filepath.Join(tempRoot, "config", "config.yaml")
-	baseDir := filepath.Join(tempRoot, "base")
-	if err := os.MkdirAll(baseDir, 0o755); err != nil {
-		t.Fatalf("failed to create base dir: %v", err)
-	}
 
-	loaded, err := loadOrInitConfig(configPath, baseDir)
+	loaded, err := loadOrInitConfig(configPath)
 	if err != nil {
 		t.Fatalf("failed to init config: %v", err)
 	}
-	if loaded.BaseDir != baseDir {
-		t.Fatalf("base dir mismatch: got %q, want %q", loaded.BaseDir, baseDir)
+
+	// 默认配置应被初始化并落盘
+	if loaded.BaseDir == "" {
+		t.Fatalf("expected non-empty base dir")
 	}
 	if loaded.VideoOutputDir == "" {
 		t.Fatalf("expected non-empty video output dir")
 	}
 	if stat, err := os.Stat(loaded.VideoOutputDir); err != nil || !stat.IsDir() {
 		t.Fatalf("expected output directory to exist, err=%v", err)
+	}
+	if _, err := os.Stat(configPath); err != nil {
+		t.Fatalf("expected config file to be created, err=%v", err)
 	}
 
 	loaded.ShowHiddenItems = true
@@ -72,7 +74,7 @@ func TestSaveAndLoadConfigYaml(t *testing.T) {
 		t.Fatalf("failed to save config: %v", err)
 	}
 
-	reloaded, err := loadOrInitConfig(configPath, "")
+	reloaded, err := loadOrInitConfig(configPath)
 	if err != nil {
 		t.Fatalf("failed to reload config: %v", err)
 	}
@@ -85,6 +87,17 @@ func TestSaveAndLoadConfigYaml(t *testing.T) {
 	if reloaded.TaskPollIntervalMs != 900 {
 		t.Fatalf("expected poll interval 900, got %d", reloaded.TaskPollIntervalMs)
 	}
+
+	// saveConfig 使用 0600（Windows 文件权限语义不同，跳过）
+	if runtime.GOOS != "windows" {
+		info, err := os.Stat(configPath)
+		if err != nil {
+			t.Fatalf("failed to stat config file: %v", err)
+		}
+		if got := info.Mode().Perm(); got != 0o600 {
+			t.Fatalf("config file permission mismatch: got %o, want 600", got)
+		}
+	}
 }
 
 func TestLoadConfigRejectsInvalidYaml(t *testing.T) {
@@ -94,7 +107,7 @@ func TestLoadConfigRejectsInvalidYaml(t *testing.T) {
 		t.Fatalf("failed to write malformed config: %v", err)
 	}
 
-	if _, err := loadOrInitConfig(configPath, ""); err == nil {
+	if _, err := loadOrInitConfig(configPath); err == nil {
 		t.Fatalf("expected YAML parse error")
 	}
 }

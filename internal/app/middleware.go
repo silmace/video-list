@@ -3,6 +3,7 @@ package app
 import (
 	"context"
 	"net/http"
+	"regexp"
 	"strings"
 	"time"
 
@@ -18,11 +19,30 @@ func requestIDFromContext(ctx context.Context) string {
 	return ""
 }
 
+func sanitizeRequestID(id string) string {
+	// Remove non-printable and unsafe characters for logging
+	id = strings.TrimSpace(id)
+	// Allow only alphanumeric, hyphens, underscores, and dots
+	re := regexp.MustCompile(`[^a-zA-Z0-9\-_.]`)
+	id = re.ReplaceAllString(id, "")
+	// Limit length to prevent log flooding
+	if len(id) > 64 {
+		id = id[:64]
+	}
+	// If nothing left or too short, generate a new one
+	if len(id) == 0 {
+		id = generateID("req")
+	}
+	return id
+}
+
 func requestIDMiddleware(next http.Handler) http.Handler {
 	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-		requestID := strings.TrimSpace(r.Header.Get("X-Request-ID"))
+		requestID := r.Header.Get("X-Request-ID")
 		if requestID == "" {
 			requestID = generateID("req")
+		} else {
+			requestID = sanitizeRequestID(requestID)
 		}
 		w.Header().Set("X-Request-ID", requestID)
 		ctx := context.WithValue(r.Context(), requestIDKey, requestID)
