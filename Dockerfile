@@ -1,8 +1,16 @@
 # Multi-stage build for video-list with multi-platform support
 # Build with: docker buildx build --platform linux/amd64,linux/arm64,linux/arm/v7 -t video-list:latest .
 
+# 可选：启用较新 Dockerfile 特性
+# syntax=docker/dockerfile:1.7
+
+ARG BUILDPLATFORM
+ARG TARGETOS
+ARG TARGETARCH
+ARG TARGETVARIANT
+
 # Stage 1: Build frontend
-FROM node:18-alpine AS frontend-builder
+FROM --platform=$BUILDPLATFORM node:24-alpine AS frontend-builder
 
 WORKDIR /build
 
@@ -21,7 +29,7 @@ COPY public ./public
 RUN npm run build
 
 # Stage 2: Build Go backend for multiple architectures
-FROM golang:1.24-alpine AS backend-builder
+FROM --platform=$BUILDPLATFORM golang:1.24-alpine AS backend-builder
 
 WORKDIR /build
 
@@ -47,10 +55,10 @@ COPY --from=frontend-builder /build/dist ./dist
 
 # Build binary with architecture-specific flags
 RUN if [ "$TARGETARCH" = "arm" ] && [ "$TARGETVARIANT" = "v7" ]; then \
-      CGO_ENABLED=0 GOOS=linux GOARCH=arm GOARM=7 \
+      CGO_ENABLED=0 GOOS=${TARGETOS:-linux} GOARCH=arm GOARM=7 \
         go build -ldflags="-s -w" -o video-list main.go; \
     else \
-      CGO_ENABLED=0 GOOS=linux GOARCH=$TARGETARCH \
+      CGO_ENABLED=0 GOOS=${TARGETOS:-linux} GOARCH=$TARGETARCH \
         go build -ldflags="-s -w" -o video-list main.go; \
     fi
 
